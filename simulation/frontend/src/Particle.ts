@@ -24,146 +24,88 @@ export class Particle {
         this.ax += fx; this.ay += fy;
     }
 
-    seekClosestExit(exits: Rect[]) {
-        if (exits.length === 0) return; 
-        
-        let closest = exits[0];
-        let recordDist = Infinity;
-
+    // 1. DESPAWN ONLY: No primitive steering, just delete them if they cross the threshold
+    checkEscaped(exits: Rect[]) {
         exits.forEach(exit => {
             const centerX = exit.x + exit.w / 2;
             const centerY = exit.y + exit.h / 2;
             const d = Math.hypot(centerX - this.x, centerY - this.y);
-            if (d < recordDist) {
-                recordDist = d;
-                closest = exit;
+            // If they are inside the exit, mark for garbage collection
+            if (d < Math.max(exit.w, exit.h) / 2) {
+                this.escaped = true; 
             }
         });
-
-        // Despawn Mechanic
-        if (recordDist < Math.max(closest.w, closest.h) / 2) {
-            this.escaped = true; 
-            return;
-        }
-
-        const targetX = closest.x + closest.w / 2;
-        const targetY = closest.y + closest.h / 2;
-        let desiredX = targetX - this.x;
-        let desiredY = targetY - this.y;
-        const distance = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
-        
-        desiredX = (desiredX / distance) * this.maxSpeed;
-        desiredY = (desiredY / distance) * this.maxSpeed;
-        
-        let steerX = desiredX - this.vx;
-        let steerY = desiredY - this.vy;
-        
-        const steerMag = Math.sqrt(steerX * steerX + steerY * steerY);
-        if (steerMag > this.maxForce) {
-            steerX = (steerX / steerMag) * this.maxForce;
-            steerY = (steerY / steerMag) * this.maxForce;
-        }
-        this.applyForce(steerX, steerY);
     }
 
-    applyPhototaxis(fires: Rect[]) {
-        let steerX = 0; let steerY = 0; let isFleeing = false;
+    // 2. Blindly Follow the AI Light Grid
+    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number) {
+        let steerX = 0; let steerY = 0;
+        let whiteCount = 0; let redCount = 0;
 
-        fires.forEach(fire => {
-            const centerX = fire.x + fire.w / 2;
-            const centerY = fire.y + fire.h / 2;
-            const dist = Math.hypot(this.x - centerX, this.y - centerY);
-            const fearRadius = Math.max(fire.w, fire.h) * 1.2;
+        const myCol = Math.max(0, Math.min(19, Math.floor(this.x / cellW)));
+        const myRow = Math.max(0, Math.min(19, Math.floor(this.y / cellH)));
 
-            if (dist > 0 && dist < fearRadius) {
-                isFleeing = true;
-                const fleeWeight = fearRadius / dist; 
-                steerX += ((this.x - centerX) / dist) * fleeWeight;
-                steerY += ((this.y - centerY) / dist) * fleeWeight;
-            }
-        });
+        // Scan a 5x5 grid area around the particle for AI lights
+        const searchRadius = 2; 
+        const startX = Math.max(0, myCol - searchRadius);
+        const endX = Math.min(19, myCol + searchRadius);
+        const startY = Math.max(0, myRow - searchRadius);
+        const endY = Math.min(19, myRow + searchRadius);
 
-        if (isFleeing) {
-            const mag = Math.sqrt(steerX * steerX + steerY * steerY);
-            steerX = (steerX / mag) * this.maxSpeed;
-            steerY = (steerY / mag) * this.maxSpeed;
-            steerX -= this.vx; steerY -= this.vy;
+        for (let x = startX; x <= endX; x++) {
+            for (let y = startY; y <= endY; y++) {
+                const cellColor = lightGrid[x][y];
+                if (cellColor === "OFF") continue;
 
-            const fleeForce = this.maxForce * 3; 
-            const steerMag = Math.sqrt(steerX * steerX + steerY * steerY);
-            if (steerMag > fleeForce) {
-                steerX = (steerX / steerMag) * fleeForce;
-                steerY = (steerY / steerMag) * fleeForce;
-            }
-            this.applyForce(steerX, steerY);
-            this.color = '#ff8800'; 
-        }
-    }
+                // Find the physical center of the glowing cell
+                const cellCenterX = (x * cellW) + (cellW / 2);
+                const cellCenterY = (y * cellH) + (cellH / 2);
 
-    applyRunway(runways: Rect[]) {
-        let steerX = 0; let steerY = 0; let isAttracted = false;
-        let insideRunway = false;
-        let activeRunway: Rect | null = null;
+                const dx = cellCenterX - this.x;
+                const dy = cellCenterY - this.y;
+                const dist = Math.hypot(dx, dy);
 
-        // FIX: Using a standard for-loop instead of .forEach so TypeScript 
-        // can track the variable assignment perfectly without getting confused by closures.
-        for (let i = 0; i < runways.length; i++) {
-            const r = runways[i];
-            if (this.x > r.x && this.x < r.x + r.w && this.y > r.y && this.y < r.y + r.h) {
-                insideRunway = true;
-                activeRunway = r;
-            } else {
-                const centerX = r.x + r.w / 2;
-                const centerY = r.y + r.h / 2;
-                const dist = Math.hypot(this.x - centerX, this.y - centerY);
-                const attractRadius = Math.max(r.w, r.h) * 1.5;
-
-                if (dist < attractRadius) {
-                    isAttracted = true;
-                    steerX += (centerX - this.x) / dist;
-                    steerY += (centerY - this.y) / dist;
+                if (dist > 0) {
+                    if (cellColor === "WHITE") {
+                        // GRAVITY: Pull towards white (stronger when closer)
+                        const weight = 1 / dist;
+                        steerX += (dx / dist) * weight;
+                        steerY += (dy / dist) * weight;
+                        whiteCount++;
+                    } else if (cellColor === "RED") {
+                        // ANTI-GRAVITY: Push away from red violently
+                        const weight = 1 / dist;
+                        steerX -= (dx / dist) * weight * 2.5; 
+                        steerY -= (dy / dist) * weight * 2.5;
+                        redCount++;
+                    }
                 }
             }
         }
 
-        if (insideRunway && activeRunway) {
-            this.maxSpeed = 5.0; 
-            this.color = '#ffffff';
-
-            // Directed Vector Alignment
-            if (activeRunway.dirX !== undefined && activeRunway.dirY !== undefined) {
-                let desiredX = activeRunway.dirX * this.maxSpeed;
-                let desiredY = activeRunway.dirY * this.maxSpeed;
-                
-                let steerX = desiredX - this.vx;
-                let steerY = desiredY - this.vy;
-                
-                this.applyForce(steerX * 0.8, steerY * 0.8);
-            }
-        } else {
-            this.maxSpeed = 2 + Math.random() * 1.5; 
-        }
-
-        if (isAttracted && !insideRunway) {
+        // Apply the AI's collective vector force
+        if (whiteCount > 0 || redCount > 0) {
             const mag = Math.hypot(steerX, steerY);
-            steerX = (steerX / mag) * this.maxSpeed;
-            steerY = (steerY / mag) * this.maxSpeed;
-            steerX -= this.vx; steerY -= this.vy;
+            if (mag > 0) {
+                steerX = (steerX / mag) * this.maxSpeed - this.vx;
+                steerY = (steerY / mag) * this.maxSpeed - this.vy;
 
-            const attractForce = this.maxForce * 1.2; 
-            const steerMag = Math.hypot(steerX, steerY);
-            if (steerMag > attractForce) {
-                steerX = (steerX / steerMag) * attractForce;
-                steerY = (steerY / steerMag) * attractForce;
+                const steerMag = Math.hypot(steerX, steerY);
+                if (steerMag > this.maxForce) {
+                    steerX = (steerX / steerMag) * this.maxForce;
+                    steerY = (steerY / steerMag) * this.maxForce;
+                }
+                this.applyForce(steerX, steerY);
             }
-            this.applyForce(steerX, steerY);
-            
-            if (this.color === this.baseColor) {
-                this.color = '#aaddff'; 
-            }
+            // Turn white if guided, orange if fleeing
+            this.color = redCount > whiteCount ? '#ff8800' : '#ffffff';
+        } else {
+            // If they are in the dark, they slow down slightly and return to base color
+            this.color = this.baseColor;
         }
     }
 
+    // 3. Keep Hard Physical Walls
     resolveWalls(walls: Rect[]) {
         walls.forEach(w => {
             let testX = this.x; let testY = this.y;
@@ -180,6 +122,7 @@ export class Particle {
         });
     }
 
+    // 4. Keep Crowd Crush physics
     separate(particles: Particle[]) {
         let steerX = 0; let steerY = 0; let crushCount = 0;
         const desiredSeparation = this.radius * 3; 

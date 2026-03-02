@@ -149,11 +149,15 @@ export const Simulation: React.FC = () => {
 
             // Execute Physics Loop
             swarmRef.current.forEach(particle => {
-                particle.applyPhototaxis(fires);       
-                particle.applyRunway(runways);         
+                // 1. Follow the AI Light Grid (no more primitive fire/runway checks)
+                particle.applyLightGrid(lg, cellW, cellH);         
+                // 2. Bounce off physical walls
                 particle.resolveWalls(walls);          
+                // 3. Don't crush each other
                 particle.separate(swarmRef.current);   
-                particle.seekClosestExit(exits);       
+                // 4. Despawn if they cross the exit threshold (no steering, just checking)
+                particle.checkEscaped(exits);       
+                
                 particle.update();
                 particle.draw(ctx);
             });
