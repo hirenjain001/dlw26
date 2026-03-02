@@ -53,7 +53,6 @@ class EvacSocket {
           return;
         }
         if (msg.type === "cmd") {
-          console.log("[ws] cmd", msg.counts, msg.policy, "delta:", msg.lights_delta.length);
           applyLightsDelta(msg.lights_delta);
           return;
         }

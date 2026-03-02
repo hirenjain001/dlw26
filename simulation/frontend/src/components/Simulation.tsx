@@ -253,11 +253,6 @@ export const Simulation: React.FC = () => {
             tickPayload.fire_off.length > 0 ||
             tickPayload.fire_on.length > 0
             ) {
-                console.log("SENDING TICK", {
-                crowd: tickPayload.crowd_delta.length,
-                fire_on: tickPayload.fire_on.length,
-                fire_off: tickPayload.fire_off.length,
-                });
                 socket.sendTick(tickPayload);
             }
         }, 200);
