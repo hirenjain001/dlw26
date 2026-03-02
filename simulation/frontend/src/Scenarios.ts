@@ -17,7 +17,7 @@ export const getScenarios = (w: number, h: number): Scenario[] => {
                 { x: w * 0.3, y: h * 0.72, w: 82, h: 42 },
                 { x: w * 0.4, y: h * 0.65, w: 87, h: 12 },
                 { x: w * 0.5, y: h * 0.52, w: 45, h: 34 },
-                { x: w * 0.6, y: h * 0.12, w: 98, h: 54 },
+                // { x: w * 0.6, y: h * 0.12, w: 98, h: 54 },
                 { x: w * 0.7, y: h * 0.37, w: 29, h: 45 },
                 { x: w * 0.8, y: h * 0.88, w: 54, h: 56 },
                 { x: w * 0.9, y: h * 0.36, w: 77, h: 23 },
