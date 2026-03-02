@@ -35,7 +35,6 @@ export class Particle {
         });
     }
 
-    // UPDATED: Now requires `exits` as the 4th argument
     applyLightGrid(lightGrid: string[][], cellW: number, cellH: number, exits: Rect[]) {
         let steerX = 0; let steerY = 0;
         let whiteCount = 0; let redCount = 0;
@@ -43,7 +42,6 @@ export class Particle {
         const myCol = Math.max(0, Math.min(19, Math.floor(this.x / cellW)));
         const myRow = Math.max(0, Math.min(19, Math.floor(this.y / cellH)));
 
-        // Is the particle currently standing safely on the AI path?
         const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
 
         const searchRadius = 2; 
@@ -72,7 +70,6 @@ export class Particle {
                         whiteCount++;
                     } else if (cellColor === "RED") {
                         const weight = 1 / dist;
-                        // RED pushes them away violently
                         steerX -= (dx / dist) * weight * 3.5; 
                         steerY -= (dy / dist) * weight * 3.5;
                         redCount++;
@@ -81,7 +78,6 @@ export class Particle {
             }
         }
 
-        // --- THE COMPASS TIE-BREAKER ---
         let compassX = 0; let compassY = 0;
         if (exits.length > 0) {
             let closest = exits[0];
@@ -102,15 +98,14 @@ export class Particle {
         }
 
         if (whiteCount > 0 || redCount > 0) {
-            // 1. Break perfect mathematical symmetry by adding the gentle compass pull
-            steerX += compassX * 1.2;
-            steerY += compassY * 1.2;
+            // FIX 1: Nerfed the compass heavily (from 1.2 down to 0.15)
+            // Now they will trust the AI's pathing around walls rather than blindly rushing the exit
+            steerX += compassX * 0.15;
+            steerY += compassY * 0.15;
 
-            // 2. Add Brownian Noise (micro-jitters to prevent clotting)
             steerX += (Math.random() - 0.5) * 0.8;
             steerY += (Math.random() - 0.5) * 0.8;
 
-            // 3. Give them a speed boost if they are safely on the white path
             const currentMaxSpeed = onWhite ? this.maxSpeed * 1.5 : this.maxSpeed;
 
             const mag = Math.hypot(steerX, steerY);
@@ -127,8 +122,7 @@ export class Particle {
             }
             this.color = redCount > whiteCount ? '#ff8800' : '#ffffff';
         } else {
-            // If they are in the dark, wander slightly so they don't freeze
-            this.applyForce((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02);
+            this.applyForce((Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05);
             this.color = this.baseColor;
         }
     }
@@ -142,9 +136,17 @@ export class Particle {
             let distX = this.x - testX; let distY = this.y - testY;
             let distance = Math.sqrt((distX * distX) + (distY * distY));
 
-            if (distance <= this.radius) {
-                this.vx *= -1; this.vy *= -1;
-                this.x += this.vx * 2; this.y += this.vy * 2;
+            if (distance <= this.radius && distance > 0) {
+                // FIX 2: Vector Sliding instead of Pong Bouncing
+                // Push the particle perfectly out of the wall based on radius overlap
+                const overlap = this.radius - distance;
+                this.x += (distX / distance) * overlap;
+                this.y += (distY / distance) * overlap;
+                
+                // Dampen the velocity heavily so they "slide" frictionally along the wall 
+                // to find the edge, rather than ricocheting backwards.
+                this.vx *= 0.5; 
+                this.vy *= 0.5;
             }
         });
     }
