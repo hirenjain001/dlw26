@@ -24,7 +24,7 @@ export const getScenarios = (w: number, h: number): Scenario[] => {
                 { x: w * 0.83, y: h * 0.45, w: 65, h: 44 }
             ],
             exits: [{ x: w * 0.98, y: h * 0.1, w: 80, h: 80 }],
-            fires: [{ x: w * 0.34, y: h * 0.12, w: 23, h: 50 }]
+            fires: [{ x: w * 0.34, y: h * 0.32, w: 100, h: 250 }]
         },
         {
             name: "2. Blocked Primary Exit",
