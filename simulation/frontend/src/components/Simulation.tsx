@@ -303,10 +303,10 @@ export const Simulation: React.FC = () => {
                 <button onClick={() => loadScenario(0)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
                     S1: Obstacle Course
                 </button>
-                <button onClick={() => loadScenario(2)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
+                <button onClick={() => loadScenario(1)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
                     S2: Office Maze
                 </button>
-                <button onClick={() => loadScenario(3)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
+                <button onClick={() => loadScenario(2)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
                     S3: Sandbox Mode
                 </button>
 
