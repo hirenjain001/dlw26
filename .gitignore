@@ -1,10 +1,65 @@
+# =========================
 # Python
+# =========================
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.env.*
 env/
 venv/
-.env
+.venv/
+ENV/
 
-# Logs and Models
-ppo_shepherd_logs/
-*.zip
+# Jupyter
 .ipynb_checkpoints/
+
+# =========================
+# Training / ML artifacts
+# =========================
+
+# Model files (large)
+*.zip
+*.pt
+*.pth
+*.ckpt
+
+# TensorBoard / training logs
+ppo_shepherd_logs/
+ppo_evac_logs/
+runs/
+logs/
+tensorboard/
+
+# Evaluation outputs
+eval*.csv
+eval*.png
+replay*.gif
+replay*.mp4
+
+# =========================
+# Runtime / cache
+# =========================
+*.log
+server.log
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Editor / IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# Misc
+# =========================
+*.swp
+*.tmp
+*.bak
