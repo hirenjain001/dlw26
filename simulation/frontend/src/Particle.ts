@@ -24,28 +24,26 @@ export class Particle {
         this.ax += fx; this.ay += fy;
     }
 
-    // 1. DESPAWN ONLY: No primitive steering, just delete them if they cross the threshold
     checkEscaped(exits: Rect[]) {
         exits.forEach(exit => {
             const centerX = exit.x + exit.w / 2;
             const centerY = exit.y + exit.h / 2;
             const d = Math.hypot(centerX - this.x, centerY - this.y);
-            // If they are inside the exit, mark for garbage collection
             if (d < Math.max(exit.w, exit.h) / 2) {
                 this.escaped = true; 
             }
         });
     }
 
-    // 2. Blindly Follow the AI Light Grid
-    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number) {
+    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number, exits: Rect[]) {
         let steerX = 0; let steerY = 0;
         let whiteCount = 0; let redCount = 0;
 
         const myCol = Math.max(0, Math.min(19, Math.floor(this.x / cellW)));
         const myRow = Math.max(0, Math.min(19, Math.floor(this.y / cellH)));
 
-        // Scan a 5x5 grid area around the particle for AI lights
+        const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
+
         const searchRadius = 2; 
         const startX = Math.max(0, myCol - searchRadius);
         const endX = Math.min(19, myCol + searchRadius);
@@ -57,7 +55,6 @@ export class Particle {
                 const cellColor = lightGrid[x][y];
                 if (cellColor === "OFF") continue;
 
-                // Find the physical center of the glowing cell
                 const cellCenterX = (x * cellW) + (cellW / 2);
                 const cellCenterY = (y * cellH) + (cellH / 2);
 
@@ -67,28 +64,54 @@ export class Particle {
 
                 if (dist > 0) {
                     if (cellColor === "WHITE") {
-                        // GRAVITY: Pull towards white (stronger when closer)
                         const weight = 1 / dist;
                         steerX += (dx / dist) * weight;
                         steerY += (dy / dist) * weight;
                         whiteCount++;
                     } else if (cellColor === "RED") {
-                        // ANTI-GRAVITY: Push away from red violently
                         const weight = 1 / dist;
-                        steerX -= (dx / dist) * weight * 2.5; 
-                        steerY -= (dy / dist) * weight * 2.5;
+                        steerX -= (dx / dist) * weight * 3.5; 
+                        steerY -= (dy / dist) * weight * 3.5;
                         redCount++;
                     }
                 }
             }
         }
 
-        // Apply the AI's collective vector force
+        let compassX = 0; let compassY = 0;
+        if (exits.length > 0) {
+            let closest = exits[0];
+            let recordDist = Infinity;
+            exits.forEach(exit => {
+                const cx = exit.x + exit.w / 2;
+                const cy = exit.y + exit.h / 2;
+                const d = Math.hypot(cx - this.x, cy - this.y);
+                if (d < recordDist) { recordDist = d; closest = exit; }
+            });
+            const dx = (closest.x + closest.w / 2) - this.x;
+            const dy = (closest.y + closest.h / 2) - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0) {
+                compassX = dx / dist;
+                compassY = dy / dist;
+            }
+        }
+
         if (whiteCount > 0 || redCount > 0) {
+            // FIX 1: Nerfed the compass heavily (from 1.2 down to 0.15)
+            // Now they will trust the AI's pathing around walls rather than blindly rushing the exit
+            steerX += compassX * 0.15;
+            steerY += compassY * 0.15;
+
+            steerX += (Math.random() - 0.5) * 0.8;
+            steerY += (Math.random() - 0.5) * 0.8;
+
+            const currentMaxSpeed = onWhite ? this.maxSpeed * 1.5 : this.maxSpeed;
+
             const mag = Math.hypot(steerX, steerY);
             if (mag > 0) {
-                steerX = (steerX / mag) * this.maxSpeed - this.vx;
-                steerY = (steerY / mag) * this.maxSpeed - this.vy;
+                steerX = (steerX / mag) * currentMaxSpeed - this.vx;
+                steerY = (steerY / mag) * currentMaxSpeed - this.vy;
 
                 const steerMag = Math.hypot(steerX, steerY);
                 if (steerMag > this.maxForce) {
@@ -97,32 +120,60 @@ export class Particle {
                 }
                 this.applyForce(steerX, steerY);
             }
-            // Turn white if guided, orange if fleeing
             this.color = redCount > whiteCount ? '#ff8800' : '#ffffff';
         } else {
-            // If they are in the dark, they slow down slightly and return to base color
+            this.applyForce((Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05);
             this.color = this.baseColor;
         }
     }
 
-    // 3. Keep Hard Physical Walls
     resolveWalls(walls: Rect[]) {
+        let repulseX = 0; let repulseY = 0;
+
         walls.forEach(w => {
             let testX = this.x; let testY = this.y;
             if (this.x < w.x) testX = w.x; else if (this.x > w.x + w.w) testX = w.x + w.w;
             if (this.y < w.y) testY = w.y; else if (this.y > w.y + w.h) testY = w.y + w.h;
 
             let distX = this.x - testX; let distY = this.y - testY;
-            let distance = Math.sqrt((distX * distX) + (distY * distY));
+            let distance = Math.hypot(distX, distY);
 
-            if (distance <= this.radius) {
-                this.vx *= -1; this.vy *= -1;
-                this.x += this.vx * 2; this.y += this.vy * 2;
+            if (distance > 0) {
+                // 1. The Ice Wall: Hard collision without losing momentum
+                if (distance <= this.radius) {
+                    const overlap = this.radius - distance;
+                    this.x += (distX / distance) * overlap;
+                    this.y += (distY / distance) * overlap;
+                    // REMOVED: vx *= 0.5 friction. They will now slide instantly.
+                }
+
+                // 2. The Forcefield: Push them away before they get stuck
+                const forcefieldRadius = 20; // Projects 20 pixels off the wall
+                if (distance < forcefieldRadius) {
+                    const pushWeight = (forcefieldRadius - distance) / forcefieldRadius;
+                    repulseX += (distX / distance) * pushWeight;
+                    repulseY += (distY / distance) * pushWeight;
+                }
             }
         });
+
+        // Apply the wall's repulsive steering force
+        if (repulseX !== 0 || repulseY !== 0) {
+            const mag = Math.hypot(repulseX, repulseY);
+            repulseX = (repulseX / mag) * this.maxSpeed - this.vx;
+            repulseY = (repulseY / mag) * this.maxSpeed - this.vy;
+            
+            // Make the wall push significantly stronger than the compass pull
+            const repulseForce = this.maxForce * 3.0; 
+            const forceMag = Math.hypot(repulseX, repulseY);
+            if (forceMag > repulseForce) {
+                repulseX = (repulseX / forceMag) * repulseForce;
+                repulseY = (repulseY / forceMag) * repulseForce;
+            }
+            this.applyForce(repulseX, repulseY);
+        }
     }
 
-    // 4. Keep Crowd Crush physics
     separate(particles: Particle[]) {
         let steerX = 0; let steerY = 0; let crushCount = 0;
         const desiredSeparation = this.radius * 3; 
@@ -159,6 +210,24 @@ export class Particle {
             }
         }
         this.applyForce(steerX, steerY);
+    }
+
+    keepInBounds(width: number, height: number) {
+        if (this.x - this.radius < 0) {
+            this.x = this.radius;
+            this.vx *= -0.5; // Bounce off the left wall
+        } else if (this.x + this.radius > width) {
+            this.x = width - this.radius;
+            this.vx *= -0.5; // Bounce off the right wall
+        }
+
+        if (this.y - this.radius < 0) {
+            this.y = this.radius;
+            this.vy *= -0.5; // Bounce off the ceiling
+        } else if (this.y + this.radius > height) {
+            this.y = height - this.radius;
+            this.vy *= -0.5; // Bounce off the floor
+        }
     }
 
     update() {
