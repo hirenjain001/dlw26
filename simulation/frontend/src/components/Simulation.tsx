@@ -1,22 +1,21 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Particle, type Rect } from '../Particle';
-import {Link} from '../../../Link';
+import { Link } from '../../../Link';
 import { socket } from "../api/evacSocket";
 import { getLightGrid, resetLightGrid } from "../state/lightGrid";
 
-type DrawMode = 'wall' | 'exit' | 'fire' | 'runway' | null;
+// 1. Replaced 'runway' with 'spawn'
+type DrawMode = 'wall' | 'exit' | 'fire' | 'spawn' | null;
 
 export const Simulation: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
     const swarmRef = useRef<Particle[]>([]);
-    const firesRef = useRef<Rect[]>([]);
 
     const [drawMode, setDrawMode] = useState<DrawMode>(null);
     const [walls, setWalls] = useState<Rect[]>([]);
     const [exits, setExits] = useState<Rect[]>([]);
     const [fires, setFires] = useState<Rect[]>([]);
-    const [runways, setRunways] = useState<Rect[]>([]);
     const [crowdSize, setCrowdSize] = useState(0);
 
     const isDrawing = useRef(false);
@@ -27,17 +26,18 @@ export const Simulation: React.FC = () => {
     const tickIntervalRef = useRef<number | null>(null);
     const [isAIDeployed, setIsAIDeployed] = useState(false);
 
+    // NEW: The live ref needed so the AI ticking loop can see new fires
+    const firesRef = useRef<Rect[]>([]);
+    useEffect(() => {
+        firesRef.current = fires;
+    }, [fires]);
+
     useEffect(() => {
         return () => {
             if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
         };
     }, []);
 
-    useEffect(() => {
-        firesRef.current = fires;
-    }, [fires]);
-
-    // 1. Fullscreen Canvas Sizing
     useEffect(() => {
         const resize = () => {
             if (canvasRef.current) {
@@ -50,7 +50,6 @@ export const Simulation: React.FC = () => {
         return () => window.removeEventListener('resize', resize);
     }, []);
 
-    // 2. The Main Render Engine
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -67,31 +66,26 @@ export const Simulation: React.FC = () => {
             const cellH = canvas.height / 20;
 
             for (let x = 0; x < 20; x++) {
-            for (let y = 0; y < 20; y++) {
-                const c = lg[x][y];
-                if (c === "OFF") continue;
+                for (let y = 0; y < 20; y++) {
+                    const c = lg[x][y];
+                    if (c === "OFF") continue;
 
-                const px = x * cellW;
-                const py = y * cellH;
+                    const px = x * cellW;
+                    const py = y * cellH;
 
+                    if (c === "WHITE") {
+                        ctx.shadowBlur = 18;
+                        ctx.shadowColor = "rgba(255,255,255,0.9)";
+                        ctx.fillStyle = "rgba(255,255,255,0.28)";
+                    } else {
+                        ctx.shadowBlur = 12;
+                        ctx.shadowColor = "rgba(255,0,0,0.9)";
+                        ctx.fillStyle = "rgba(255,0,0,0.30)";
+                    }
 
-                if (c === "WHITE") {
-                // Glow effect for guidance lights
-                ctx.shadowBlur = 18;
-                ctx.shadowColor = "rgba(255,255,255,0.9)";
-                ctx.fillStyle = "rgba(255,255,255,0.28)";
-                } else {
-                // Slight glow for danger
-                ctx.shadowBlur = 12;
-                ctx.shadowColor = "rgba(255,0,0,0.9)";
-                ctx.fillStyle = "rgba(255,0,0,0.30)";
+                    ctx.fillRect(px, py, cellW, cellH);
+                    ctx.shadowBlur = 0;
                 }
-
-    ctx.fillRect(px, py, cellW, cellH);
-
-    // reset shadow so it doesn't affect other drawings
-    ctx.shadowBlur = 0;
-            }
             }
 
             exits.forEach(e => {
@@ -115,38 +109,12 @@ export const Simulation: React.FC = () => {
                 ctx.strokeRect(f.x, f.y, f.w, f.h);
             });
 
-            runways.forEach(r => {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-                ctx.fillRect(r.x, r.y, r.w, r.h);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(r.x, r.y, r.w, r.h);
-                
-                // Draw the Vector Arrow
-                if (r.dirX !== undefined && r.dirY !== undefined) {
-                    const cx = r.x + r.w / 2;
-                    const cy = r.y + r.h / 2;
-                    const length = Math.min(r.w, r.h) / 3;
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(cx - r.dirX * length, cy - r.dirY * length);
-                    ctx.lineTo(cx + r.dirX * length, cy + r.dirY * length);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                    ctx.lineWidth = 4;
-                    ctx.stroke();
-                    
-                    ctx.beginPath();
-                    ctx.arc(cx + r.dirX * length, cy + r.dirY * length, 6, 0, Math.PI * 2);
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fill();
-                }
-            });
-
             if (isDrawing.current && currentRect.current) {
                 const r = currentRect.current;
+                // Cyan dashed line for the spawn zone
                 ctx.strokeStyle = drawMode === 'wall' ? '#aaaaaa' : 
                                   drawMode === 'exit' ? '#00ff00' : 
-                                  drawMode === 'fire' ? '#ff0000' : '#ffffff';
+                                  drawMode === 'fire' ? '#ff0000' : '#00ffff'; 
                 ctx.setLineDash([5, 5]);
                 ctx.strokeRect(r.x, r.y, r.w, r.h);
                 ctx.setLineDash([]); 
@@ -154,26 +122,18 @@ export const Simulation: React.FC = () => {
 
             // Execute Physics Loop
             swarmRef.current.forEach(particle => {
-                // 1. Follow the AI Light Grid
                 particle.applyLightGrid(lg, cellW, cellH, exits);
-                // 2. Bounce off physical walls
                 particle.resolveWalls(walls);          
-                // 3. Don't crush each other
                 particle.separate(swarmRef.current);   
-                // 4. Despawn if they cross the exit threshold
-                particle.checkEscaped(exits);       
-                
-                // 5. NEW: Bounce off the literal edges of the screen
-                particle.keepInBounds(canvas.width, canvas.height);
+                particle.checkEscaped(exits);
+                particle.keepInBounds(canvas.width, canvas.height); // Keeps them on screen
                 
                 particle.update();
                 particle.draw(ctx);
             });
 
-            // The Garbage Collector
             swarmRef.current = swarmRef.current.filter(p => !p.escaped);
             
-            // Live DOM update (Bypasses React State for 60fps performance)
             const popCounter = document.getElementById('population-counter');
             if (popCounter) popCounter.innerText = swarmRef.current.length.toString();
 
@@ -182,9 +142,8 @@ export const Simulation: React.FC = () => {
 
         requestRef.current = requestAnimationFrame(render);
         return () => cancelAnimationFrame(requestRef.current);
-    }, [walls, exits, fires, runways, drawMode]);
+    }, [walls, exits, fires, drawMode]);
 
-    // 3. Mouse Handlers
     const getMousePos = (e: React.MouseEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         return { x: e.clientX - (rect?.left || 0), y: e.clientY - (rect?.top || 0) };
@@ -212,38 +171,32 @@ export const Simulation: React.FC = () => {
         if (!isDrawing.current || !currentRect.current || !drawMode) return;
         
         if (currentRect.current.w > 5 && currentRect.current.h > 5) {
-            const pos = getMousePos(e);
-            const dx = pos.x - startPos.current.x;
-            const dy = pos.y - startPos.current.y;
-            const mag = Math.hypot(dx, dy);
             
-            const dirX = mag > 0 ? dx / mag : 0;
-            const dirY = mag > 0 ? dy / mag : 0;
-            
-            const directedRect: Rect = { ...currentRect.current, dirX, dirY };
-
-            if (drawMode === 'wall') setWalls([...walls, currentRect.current]);
-            if (drawMode === 'exit') setExits([...exits, currentRect.current]);
-            if (drawMode === 'fire') setFires([...fires, currentRect.current]);
-            if (drawMode === 'runway') setRunways([...runways, directedRect]);
+            // 2. THE CUSTOM SPAWN ZONE LOGIC
+            if (drawMode === 'spawn') {
+                // Calculate area to determine how many people to spawn (bigger box = more people)
+                const area = currentRect.current.w * currentRect.current.h;
+                const spawnCount = Math.min(250, Math.max(10, Math.floor(area / 800)));
+                
+                for (let i = 0; i < spawnCount; i++) {
+                    const spawnX = currentRect.current.x + Math.random() * currentRect.current.w;
+                    const spawnY = currentRect.current.y + Math.random() * currentRect.current.h;
+                    swarmRef.current.push(new Particle(spawnX, spawnY));
+                }
+                setCrowdSize(swarmRef.current.length);
+            } 
+            else if (drawMode === 'wall') setWalls([...walls, currentRect.current]);
+            else if (drawMode === 'exit') setExits([...exits, currentRect.current]);
+            else if (drawMode === 'fire') setFires([...fires, currentRect.current]);
         }
+        
         isDrawing.current = false;
         currentRect.current = null;
     };
 
-    // 4. UI Controls
-    const spawnPeople = (amount: number) => {
-        for (let i = 0; i < amount; i++) {
-            const spawnX = window.innerWidth * 0.1 + Math.random() * 200;
-            const spawnY = window.innerHeight * 0.5 - 150 + Math.random() * 300;
-            swarmRef.current.push(new Particle(spawnX, spawnY));
-        }
-        setCrowdSize(swarmRef.current.length);
-    };
-
     const clearSim = () => {
         swarmRef.current = [];
-        setWalls([]); setExits([]); setFires([]); setRunways([]); setCrowdSize(0);
+        setWalls([]); setExits([]); setFires([]); setCrowdSize(0);
     };
 
     const toggleAI = () => {
@@ -261,20 +214,17 @@ export const Simulation: React.FC = () => {
 
         if (!canvasRef.current) return;
 
-        // Connect WS
         socket.connect();
 
-        // Instantiate link
         const link = new Link(canvasRef.current.width, canvasRef.current.height);
         aiLinkRef.current = link;
 
-        // INIT
         const initPayload = link.generateInit(walls, exits);
         console.log("SENDING INIT", initPayload);
         socket.sendInit(initPayload);
 
-        // TICK loop
         tickIntervalRef.current = window.setInterval(() => {
+            // FED firesRef.current SO THE LOOP SEES NEW FIRES
             const tickPayload = aiLinkRef.current?.generateTick(swarmRef.current, firesRef.current);
             if (!tickPayload) return;
 
@@ -287,9 +237,9 @@ export const Simulation: React.FC = () => {
             }
         }, 200);
         
-
         setIsAIDeployed(true);
     };
+
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-black">
             <canvas
@@ -321,19 +271,16 @@ export const Simulation: React.FC = () => {
                     className={`px-4 py-2 rounded transition-colors ${drawMode === 'fire' ? 'bg-red-700 text-white' : 'bg-gray-800 text-red-400 hover:bg-gray-700'}`}>
                     [+] FIRE
                 </button>
+                
+                {/* 3. REPLACED RUNWAY AND SPAWN 100 WITH THIS TARGETED SPAWN TOOL */}
                 <button 
-                    onClick={() => setDrawMode(drawMode === 'runway' ? null : 'runway')}
-                    className={`px-4 py-2 rounded transition-colors ${drawMode === 'runway' ? 'bg-gray-200 text-black font-bold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
-                    [+] RUNWAY
+                    onClick={() => setDrawMode(drawMode === 'spawn' ? null : 'spawn')}
+                    className={`px-4 py-2 rounded transition-colors ${drawMode === 'spawn' ? 'bg-cyan-700 text-white' : 'bg-gray-800 text-cyan-400 hover:bg-gray-700'}`}>
+                    [+] SPAWN ZONE
                 </button>
 
                 <div className="h-8 w-px bg-gray-700 mx-2"></div>
 
-                <button 
-                    onClick={() => spawnPeople(100)}
-                    className="px-4 py-2 bg-cyan-900 text-cyan-300 rounded hover:bg-cyan-800 transition-colors">
-                    SPAWN 100
-                </button>
                 <button 
                     onClick={clearSim}
                     className="px-4 py-2 bg-red-900/50 text-red-400 rounded hover:bg-red-900 transition-colors border border-red-900">
@@ -349,7 +296,7 @@ export const Simulation: React.FC = () => {
             
             {drawMode && (
                 <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-black/80 border border-gray-700 px-6 py-2 rounded text-white font-mono text-sm animate-pulse">
-                    Click and drag on the canvas to draw a {drawMode.toUpperCase()}
+                    Click and drag on the canvas to draw a {drawMode.toUpperCase()} zone
                 </div>
             )}
         </div>
