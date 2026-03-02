@@ -212,6 +212,24 @@ export class Particle {
         this.applyForce(steerX, steerY);
     }
 
+    keepInBounds(width: number, height: number) {
+        if (this.x - this.radius < 0) {
+            this.x = this.radius;
+            this.vx *= -0.5; // Bounce off the left wall
+        } else if (this.x + this.radius > width) {
+            this.x = width - this.radius;
+            this.vx *= -0.5; // Bounce off the right wall
+        }
+
+        if (this.y - this.radius < 0) {
+            this.y = this.radius;
+            this.vy *= -0.5; // Bounce off the ceiling
+        } else if (this.y + this.radius > height) {
+            this.y = height - this.radius;
+            this.vy *= -0.5; // Bounce off the floor
+        }
+    }
+
     update() {
         this.vx += this.ax; this.vy += this.ay;
         this.x += this.vx; this.y += this.vy;
