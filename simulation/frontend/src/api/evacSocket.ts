@@ -2,13 +2,14 @@ import type { InitPayload, TickPayload, ServerMsg } from "./protocol";
 import { applyLightsDelta } from "../state/lightGrid";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
+type ClientMsg = InitPayload | TickPayload;
 
 class EvacSocket {
   private ws: WebSocket | null = null;
   private status: Status = "idle";
+  private outbox: ClientMsg[] = [];
 
   private url(): string {
-    // Use Vite env if present, else default to local backend
     const envUrl = (import.meta as any).env?.VITE_WS_URL as string | undefined;
     return envUrl ?? "ws://127.0.0.1:8000/ws";
   }
@@ -16,12 +17,17 @@ class EvacSocket {
   public connect(): void {
     if (this.ws && (this.status === "open" || this.status === "connecting")) return;
 
+    console.log("[ws] connecting", this.url());
     this.status = "connecting";
     this.ws = new WebSocket(this.url());
 
     this.ws.onopen = () => {
       this.status = "open";
       console.log("[ws] open", this.url());
+
+      // flush queued init/ticks
+      for (const msg of this.outbox) this.ws!.send(JSON.stringify(msg));
+      this.outbox = [];
     };
 
     this.ws.onclose = () => {
@@ -42,14 +48,12 @@ class EvacSocket {
           console.log("[ws] ack", msg);
           return;
         }
-
         if (msg.type === "error") {
           console.error("[ws] backend error:", msg.message);
           return;
         }
-
         if (msg.type === "cmd") {
-          // core behaviour: apply lights delta to grid store
+          console.log("[ws] cmd", msg.counts, msg.policy, "delta:", msg.lights_delta.length);
           applyLightsDelta(msg.lights_delta);
           return;
         }
@@ -62,15 +66,20 @@ class EvacSocket {
   }
 
   public disconnect(): void {
+    this.outbox = [];
     if (!this.ws) return;
     this.ws.close();
     this.ws = null;
     this.status = "closed";
   }
 
-  private send(obj: ServerMsg | InitPayload | TickPayload): void {
-    if (!this.ws || this.status !== "open") return;
-    this.ws.send(JSON.stringify(obj));
+  private send(obj: ClientMsg): void {
+    if (this.ws && this.status === "open") {
+      this.ws.send(JSON.stringify(obj));
+      return;
+    }
+    // queue until open
+    this.outbox.push(obj);
   }
 
   public sendInit(payload: InitPayload): void {

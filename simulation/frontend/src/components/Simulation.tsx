@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Particle, type Rect } from '../Particle';
 import {Link} from '../../../Link';
+import { socket } from "../api/evacSocket";
+import { getLightGrid, resetLightGrid } from "../state/lightGrid";
 
 type DrawMode = 'wall' | 'exit' | 'fire' | 'runway' | null;
 
@@ -53,6 +55,21 @@ export const Simulation: React.FC = () => {
         const render = () => {
             ctx.fillStyle = '#0a0a0a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // === AI LIGHT OVERLAY (20x20) ===
+            const lg = getLightGrid();
+            const cellW = canvas.width / 20;
+            const cellH = canvas.height / 20;
+
+            for (let x = 0; x < 20; x++) {
+            for (let y = 0; y < 20; y++) {
+                const c = lg[x][y];
+                if (c === "OFF") continue;
+                ctx.fillStyle =
+                c === "WHITE" ? "rgba(255,255,255,0.10)" : "rgba(255,0,0,0.18)";
+                ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+            }
+            }
 
             exits.forEach(e => {
                 ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
@@ -202,42 +219,52 @@ export const Simulation: React.FC = () => {
     const toggleAI = () => {
         if (isAIDeployed) {
             if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
+                tickIntervalRef.current = null;
+
+            socket.disconnect();
+            resetLightGrid();
+
             setIsAIDeployed(false);
             console.log("AI PIPELINE OFFLINE");
             return;
         }
 
-        if(!canvasRef.current) return;
+        if (!canvasRef.current) return;
 
-        // Instantiate custom math class
+        // Connect WS
+        socket.connect();
+
+        // Instantiate link
         const link = new Link(canvasRef.current.width, canvasRef.current.height);
         aiLinkRef.current = link;
 
-        // Generate and output the INIT payload
+        // INIT
         const initPayload = link.generateInit(walls, exits);
         console.log("SENDING INIT", initPayload);
+        socket.sendInit(initPayload);
 
-        // FIXME: @txryn - plug WebSocket SEND here -> ws.send(JSON.stringify(initPayload));
-
-        // Start the 200ms TICK loop
+        // TICK loop
         tickIntervalRef.current = window.setInterval(() => {
             const tickPayload = aiLinkRef.current?.generateTick(swarmRef.current, fires);
+            if (!tickPayload) return;
 
-            if (tickPayload) {
-                // Only log changes
-                if (tickPayload.crowd_delta.length > 0 ||
-                    tickPayload.fire_off.length > 0 ||
-                    tickPayload.fire_on.length > 0) {
-                        console.log("SENDING TICK DATA");
-
-                        // FIXME: @txryn - plug WebSocket SEND here -> ws.send(JSON.stringify(initPayload));
-                    }
+            if (
+            tickPayload.crowd_delta.length > 0 ||
+            tickPayload.fire_off.length > 0 ||
+            tickPayload.fire_on.length > 0
+            ) {
+                console.log("SENDING TICK", {
+                crowd: tickPayload.crowd_delta.length,
+                fire_on: tickPayload.fire_on.length,
+                fire_off: tickPayload.fire_off.length,
+                });
+                socket.sendTick(tickPayload);
             }
         }, 200);
+        
 
         setIsAIDeployed(true);
     };
-
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-black">
             <canvas
