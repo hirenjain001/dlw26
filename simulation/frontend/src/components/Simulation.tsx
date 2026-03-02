@@ -224,9 +224,11 @@ export const Simulation: React.FC = () => {
         socket.sendInit(initPayload);
 
         tickIntervalRef.current = window.setInterval(() => {
-            // FED firesRef.current SO THE LOOP SEES NEW FIRES
             const tickPayload = aiLinkRef.current?.generateTick(swarmRef.current, firesRef.current);
             if (!tickPayload) return;
+
+            if (tickPayload.fire_on.length > 0) console.log("🔥 FRONTEND SENT FIRE_ON:", tickPayload.fire_on);
+            if (tickPayload.fire_off.length > 0) console.error("🧯 FRONTEND SENT FIRE_OFF:", tickPayload.fire_off);
 
             if (
             tickPayload.crowd_delta.length > 0 ||
