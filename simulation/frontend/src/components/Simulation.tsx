@@ -150,7 +150,7 @@ export const Simulation: React.FC = () => {
             // Execute Physics Loop
             swarmRef.current.forEach(particle => {
                 // 1. Follow the AI Light Grid (no more primitive fire/runway checks)
-                particle.applyLightGrid(lg, cellW, cellH);         
+                particle.applyLightGrid(lg, cellW, cellH, exits);
                 // 2. Bounce off physical walls
                 particle.resolveWalls(walls);          
                 // 3. Don't crush each other

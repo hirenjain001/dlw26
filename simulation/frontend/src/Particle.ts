@@ -24,28 +24,28 @@ export class Particle {
         this.ax += fx; this.ay += fy;
     }
 
-    // 1. DESPAWN ONLY: No primitive steering, just delete them if they cross the threshold
     checkEscaped(exits: Rect[]) {
         exits.forEach(exit => {
             const centerX = exit.x + exit.w / 2;
             const centerY = exit.y + exit.h / 2;
             const d = Math.hypot(centerX - this.x, centerY - this.y);
-            // If they are inside the exit, mark for garbage collection
             if (d < Math.max(exit.w, exit.h) / 2) {
                 this.escaped = true; 
             }
         });
     }
 
-    // 2. Blindly Follow the AI Light Grid
-    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number) {
+    // UPDATED: Now requires `exits` as the 4th argument
+    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number, exits: Rect[]) {
         let steerX = 0; let steerY = 0;
         let whiteCount = 0; let redCount = 0;
 
         const myCol = Math.max(0, Math.min(19, Math.floor(this.x / cellW)));
         const myRow = Math.max(0, Math.min(19, Math.floor(this.y / cellH)));
 
-        // Scan a 5x5 grid area around the particle for AI lights
+        // Is the particle currently standing safely on the AI path?
+        const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
+
         const searchRadius = 2; 
         const startX = Math.max(0, myCol - searchRadius);
         const endX = Math.min(19, myCol + searchRadius);
@@ -57,7 +57,6 @@ export class Particle {
                 const cellColor = lightGrid[x][y];
                 if (cellColor === "OFF") continue;
 
-                // Find the physical center of the glowing cell
                 const cellCenterX = (x * cellW) + (cellW / 2);
                 const cellCenterY = (y * cellH) + (cellH / 2);
 
@@ -67,28 +66,57 @@ export class Particle {
 
                 if (dist > 0) {
                     if (cellColor === "WHITE") {
-                        // GRAVITY: Pull towards white (stronger when closer)
                         const weight = 1 / dist;
                         steerX += (dx / dist) * weight;
                         steerY += (dy / dist) * weight;
                         whiteCount++;
                     } else if (cellColor === "RED") {
-                        // ANTI-GRAVITY: Push away from red violently
                         const weight = 1 / dist;
-                        steerX -= (dx / dist) * weight * 2.5; 
-                        steerY -= (dy / dist) * weight * 2.5;
+                        // RED pushes them away violently
+                        steerX -= (dx / dist) * weight * 3.5; 
+                        steerY -= (dy / dist) * weight * 3.5;
                         redCount++;
                     }
                 }
             }
         }
 
-        // Apply the AI's collective vector force
+        // --- THE COMPASS TIE-BREAKER ---
+        let compassX = 0; let compassY = 0;
+        if (exits.length > 0) {
+            let closest = exits[0];
+            let recordDist = Infinity;
+            exits.forEach(exit => {
+                const cx = exit.x + exit.w / 2;
+                const cy = exit.y + exit.h / 2;
+                const d = Math.hypot(cx - this.x, cy - this.y);
+                if (d < recordDist) { recordDist = d; closest = exit; }
+            });
+            const dx = (closest.x + closest.w / 2) - this.x;
+            const dy = (closest.y + closest.h / 2) - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0) {
+                compassX = dx / dist;
+                compassY = dy / dist;
+            }
+        }
+
         if (whiteCount > 0 || redCount > 0) {
+            // 1. Break perfect mathematical symmetry by adding the gentle compass pull
+            steerX += compassX * 1.2;
+            steerY += compassY * 1.2;
+
+            // 2. Add Brownian Noise (micro-jitters to prevent clotting)
+            steerX += (Math.random() - 0.5) * 0.8;
+            steerY += (Math.random() - 0.5) * 0.8;
+
+            // 3. Give them a speed boost if they are safely on the white path
+            const currentMaxSpeed = onWhite ? this.maxSpeed * 1.5 : this.maxSpeed;
+
             const mag = Math.hypot(steerX, steerY);
             if (mag > 0) {
-                steerX = (steerX / mag) * this.maxSpeed - this.vx;
-                steerY = (steerY / mag) * this.maxSpeed - this.vy;
+                steerX = (steerX / mag) * currentMaxSpeed - this.vx;
+                steerY = (steerY / mag) * currentMaxSpeed - this.vy;
 
                 const steerMag = Math.hypot(steerX, steerY);
                 if (steerMag > this.maxForce) {
@@ -97,15 +125,14 @@ export class Particle {
                 }
                 this.applyForce(steerX, steerY);
             }
-            // Turn white if guided, orange if fleeing
             this.color = redCount > whiteCount ? '#ff8800' : '#ffffff';
         } else {
-            // If they are in the dark, they slow down slightly and return to base color
+            // If they are in the dark, wander slightly so they don't freeze
+            this.applyForce((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02);
             this.color = this.baseColor;
         }
     }
 
-    // 3. Keep Hard Physical Walls
     resolveWalls(walls: Rect[]) {
         walls.forEach(w => {
             let testX = this.x; let testY = this.y;
@@ -122,7 +149,6 @@ export class Particle {
         });
     }
 
-    // 4. Keep Crowd Crush physics
     separate(particles: Particle[]) {
         let steerX = 0; let steerY = 0; let crushCount = 0;
         const desiredSeparation = this.radius * 3; 
