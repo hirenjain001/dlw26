@@ -3,6 +3,7 @@ import { Particle, type Rect } from '../Particle';
 import { Link } from '../../../Link';
 import { socket } from "../api/evacSocket";
 import { getLightGrid, resetLightGrid } from "../state/lightGrid";
+import { getScenarios } from '../Scenarios';
 
 // 1. Replaced 'runway' with 'spawn'
 type DrawMode = 'wall' | 'exit' | 'fire' | 'spawn' | null;
@@ -199,6 +200,24 @@ export const Simulation: React.FC = () => {
         setWalls([]); setExits([]); setFires([]); setCrowdSize(0);
     };
 
+    const loadScenario = (index: number) => {
+        if (!canvasRef.current) return;
+        
+        // 1. Shut down any active AI pipelines and clear the board
+        clearSim();
+        
+        // 2. Fetch the dynamic screen coordinates
+        const scenarios = getScenarios(canvasRef.current.width, canvasRef.current.height);
+        const selected = scenarios[index];
+
+        // 3. Inject the layout
+        setWalls(selected.walls);
+        setExits(selected.exits);
+        setFires(selected.fires);
+        
+        console.log(`Loaded Scenario: ${selected.name}`);
+    };
+
     const toggleAI = () => {
         if (isAIDeployed) {
             if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
@@ -279,6 +298,16 @@ export const Simulation: React.FC = () => {
                     onClick={() => setDrawMode(drawMode === 'spawn' ? null : 'spawn')}
                     className={`px-4 py-2 rounded transition-colors ${drawMode === 'spawn' ? 'bg-cyan-700 text-white' : 'bg-gray-800 text-cyan-400 hover:bg-gray-700'}`}>
                     [+] SPAWN ZONE
+                </button>
+                <div className="h-8 w-px bg-gray-700 mx-2"></div>
+                <button onClick={() => loadScenario(0)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
+                    S1: Bottleneck
+                </button>
+                <button onClick={() => loadScenario(1)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
+                    S2: Fire Reroute
+                </button>
+                <button onClick={() => loadScenario(2)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
+                    S3: Office Maze
                 </button>
 
                 <div className="h-8 w-px bg-gray-700 mx-2"></div>
