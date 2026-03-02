@@ -10,7 +10,7 @@ export interface Scenario {
 export const getScenarios = (w: number, h: number): Scenario[] => {
     return [
         {
-            name: "1. Bottleneck",
+            name: "1. Obstacle Course",
             walls: [
                 { x: w * 0.1, y: h * 0.24, w: 90, h: 12 },
                 { x: w * 0.2, y: h * 0.83, w: 80, h: 13 },
@@ -27,22 +27,7 @@ export const getScenarios = (w: number, h: number): Scenario[] => {
             fires: [{ x: w * 0.34, y: h * 0.32, w: 100, h: 250 }]
         },
         {
-            name: "2. Blocked Primary Exit",
-            walls: [
-                // A central dividing wall
-                { x: w * 0.5, y: h * 0.2, w: 40, h: h * 0.6 }
-            ],
-            exits: [
-                { x: 20, y: h * 0.4, w: 40, h: h * 0.2 },       // Left Exit
-                { x: w - 60, y: h * 0.4, w: 40, h: h * 0.2 }    // Right Exit
-            ],
-            fires: [
-                // A massive fire sitting directly in front of the Right Exit
-                { x: w - 250, y: h * 0.3, w: 150, h: h * 0.4 } 
-            ]
-        },
-        {
-            name: "3. Office Maze",
+            name: "2. Office Maze",
             walls: [
                 { x: w * 0.2, y: h * 0.2, w: w * 0.4, h: 40 },
                 { x: w * 0.4, y: h * 0.5, w: w * 0.4, h: 40 },
@@ -52,7 +37,7 @@ export const getScenarios = (w: number, h: number): Scenario[] => {
             fires: []
         },
         {
-            name: "4. Sandbox Mode",
+            name: "3. Sandbox Mode",
             walls: [],
             exits: [],
             fires: []

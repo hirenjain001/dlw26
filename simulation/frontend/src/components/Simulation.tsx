@@ -301,16 +301,13 @@ export const Simulation: React.FC = () => {
                 </button>
                 <div className="h-8 w-px bg-gray-700 mx-2"></div>
                 <button onClick={() => loadScenario(0)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
-                    S1: Bottleneck
-                </button>
-                <button onClick={() => loadScenario(1)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
-                    S2: Fire Reroute
+                    S1: Obstacle Course
                 </button>
                 <button onClick={() => loadScenario(2)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
-                    S3: Office Maze
+                    S2: Office Maze
                 </button>
                 <button onClick={() => loadScenario(3)} className="px-3 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 border border-gray-600">
-                    S4: Sandbox Mode
+                    S3: Sandbox Mode
                 </button>
 
                 <div className="h-8 w-px bg-gray-700 mx-2"></div>
