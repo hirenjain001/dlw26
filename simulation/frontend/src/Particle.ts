@@ -128,27 +128,50 @@ export class Particle {
     }
 
     resolveWalls(walls: Rect[]) {
+        let repulseX = 0; let repulseY = 0;
+
         walls.forEach(w => {
             let testX = this.x; let testY = this.y;
             if (this.x < w.x) testX = w.x; else if (this.x > w.x + w.w) testX = w.x + w.w;
             if (this.y < w.y) testY = w.y; else if (this.y > w.y + w.h) testY = w.y + w.h;
 
             let distX = this.x - testX; let distY = this.y - testY;
-            let distance = Math.sqrt((distX * distX) + (distY * distY));
+            let distance = Math.hypot(distX, distY);
 
-            if (distance <= this.radius && distance > 0) {
-                // FIX 2: Vector Sliding instead of Pong Bouncing
-                // Push the particle perfectly out of the wall based on radius overlap
-                const overlap = this.radius - distance;
-                this.x += (distX / distance) * overlap;
-                this.y += (distY / distance) * overlap;
-                
-                // Dampen the velocity heavily so they "slide" frictionally along the wall 
-                // to find the edge, rather than ricocheting backwards.
-                this.vx *= 0.5; 
-                this.vy *= 0.5;
+            if (distance > 0) {
+                // 1. The Ice Wall: Hard collision without losing momentum
+                if (distance <= this.radius) {
+                    const overlap = this.radius - distance;
+                    this.x += (distX / distance) * overlap;
+                    this.y += (distY / distance) * overlap;
+                    // REMOVED: vx *= 0.5 friction. They will now slide instantly.
+                }
+
+                // 2. The Forcefield: Push them away before they get stuck
+                const forcefieldRadius = 20; // Projects 20 pixels off the wall
+                if (distance < forcefieldRadius) {
+                    const pushWeight = (forcefieldRadius - distance) / forcefieldRadius;
+                    repulseX += (distX / distance) * pushWeight;
+                    repulseY += (distY / distance) * pushWeight;
+                }
             }
         });
+
+        // Apply the wall's repulsive steering force
+        if (repulseX !== 0 || repulseY !== 0) {
+            const mag = Math.hypot(repulseX, repulseY);
+            repulseX = (repulseX / mag) * this.maxSpeed - this.vx;
+            repulseY = (repulseY / mag) * this.maxSpeed - this.vy;
+            
+            // Make the wall push significantly stronger than the compass pull
+            const repulseForce = this.maxForce * 3.0; 
+            const forceMag = Math.hypot(repulseX, repulseY);
+            if (forceMag > repulseForce) {
+                repulseX = (repulseX / forceMag) * repulseForce;
+                repulseY = (repulseY / forceMag) * repulseForce;
+            }
+            this.applyForce(repulseX, repulseY);
+        }
     }
 
     separate(particles: Particle[]) {
