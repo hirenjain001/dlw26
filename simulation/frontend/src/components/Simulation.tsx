@@ -65,9 +65,27 @@ export const Simulation: React.FC = () => {
             for (let y = 0; y < 20; y++) {
                 const c = lg[x][y];
                 if (c === "OFF") continue;
-                ctx.fillStyle =
-                c === "WHITE" ? "rgba(255,255,255,0.10)" : "rgba(255,0,0,0.18)";
-                ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+
+                const px = x * cellW;
+                const py = y * cellH;
+
+
+                if (c === "WHITE") {
+                // Glow effect for guidance lights
+                ctx.shadowBlur = 18;
+                ctx.shadowColor = "rgba(255,255,255,0.9)";
+                ctx.fillStyle = "rgba(255,255,255,0.28)";
+                } else {
+                // Slight glow for danger
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = "rgba(255,0,0,0.9)";
+                ctx.fillStyle = "rgba(255,0,0,0.30)";
+                }
+
+    ctx.fillRect(px, py, cellW, cellH);
+
+    // reset shadow so it doesn't affect other drawings
+    ctx.shadowBlur = 0;
             }
             }
 
