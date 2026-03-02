@@ -10,6 +10,7 @@ export const Simulation: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
     const swarmRef = useRef<Particle[]>([]);
+    const firesRef = useRef<Rect[]>([]);
 
     const [drawMode, setDrawMode] = useState<DrawMode>(null);
     const [walls, setWalls] = useState<Rect[]>([]);
@@ -31,6 +32,10 @@ export const Simulation: React.FC = () => {
             if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
         };
     }, []);
+
+    useEffect(() => {
+        firesRef.current = fires;
+    }, [fires]);
 
     // 1. Fullscreen Canvas Sizing
     useEffect(() => {
@@ -267,7 +272,7 @@ export const Simulation: React.FC = () => {
 
         // TICK loop
         tickIntervalRef.current = window.setInterval(() => {
-            const tickPayload = aiLinkRef.current?.generateTick(swarmRef.current, fires);
+            const tickPayload = aiLinkRef.current?.generateTick(swarmRef.current, firesRef.current);
             if (!tickPayload) return;
 
             if (
