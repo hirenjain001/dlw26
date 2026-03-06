@@ -7,6 +7,7 @@ export class Particle {
     maxSpeed: number; maxForce: number; radius: number;
     color: string; baseColor: string; crushColor: string;
     escaped: boolean;
+    readonly compassPower: number = 0.12;
 
     constructor(x: number, y: number) {
         this.x = x; this.y = y;
@@ -98,10 +99,8 @@ export class Particle {
         }
 
         if (whiteCount > 0 || redCount > 0) {
-            // FIX 1: Nerfed the compass heavily (from 1.2 down to 0.15)
-            // Now they will trust the AI's pathing around walls rather than blindly rushing the exit
-            steerX += compassX * 0.15;
-            steerY += compassY * 0.15;
+            steerX += compassX * this.compassPower;
+            steerY += compassY * this.compassPower;
 
             steerX += (Math.random() - 0.5) * 0.8;
             steerY += (Math.random() - 0.5) * 0.8;
