@@ -1,5 +1,4 @@
 # evac_core.py: contains shared logic
-
 from __future__ import annotations
 
 from collections import deque
@@ -23,6 +22,15 @@ GUIDE_THICKNESS = 1
 MAX_EXITS = 3
 AUTO_ACTION = MAX_EXITS
 N_ACTIONS = MAX_EXITS + 1
+
+# --- Density / anti-flicker logic ---
+DENSITY_COST_SOFT = max(1, DENSITY_LIMIT - 1)
+DENSITY_COST_ALPHA = 1.25
+DENSITY_COST_POWER = 2.0
+
+CONGESTION_RED_ON = max(5, DENSITY_LIMIT + 2)
+CONGESTION_RED_OFF = max(4, DENSITY_LIMIT + 1)
+CONGESTION_HOLD_TICKS = 3
 
 
 # ============================================================
@@ -172,7 +180,7 @@ def build_guidance_corridor_mask(
 
 
 # ============================================================
-# LIGHT FIELD (forced red + corridor white)
+# LIGHT FIELD
 # ============================================================
 
 def build_light_field(
@@ -182,26 +190,97 @@ def build_light_field(
     corridor_mask: np.ndarray,
 ) -> np.ndarray:
     """
+    Legacy light field:
     returns light grid float32: -1 white, 0 off, +1 red
     """
-    w, h = layout.shape
-    light = np.zeros((w, h), dtype=np.float32)
+    light = np.zeros(layout.shape, dtype=np.float32)
 
-    # forced red near fire
     fire_cells = np.argwhere(fire == 1)
     if len(fire_cells) > 0:
         fire_mask = manhattan_circle_mask_fast(fire_cells, layout.shape, FIRE_RADIUS)
         light[np.where(fire_mask & (layout != 1))] = 1.0
 
-    # forced red for overcrowding
     overcrowd_mask = (crowd > DENSITY_LIMIT)
     light[np.where(overcrowd_mask & (layout != 1) & (layout != 2))] = 1.0
 
-    # corridor white (never overwrite forced red)
     eligible = corridor_mask & (layout != 1) & (layout != 2) & (fire == 0) & (light != 1.0)
     light[np.where(eligible)] = -1.0
 
     return light
+
+
+def update_congestion_state(
+    layout: np.ndarray,
+    fire: np.ndarray,
+    crowd: np.ndarray,
+    prev_state: np.ndarray,
+    hold_until: np.ndarray,
+    tick: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Hysteresis + hold-time for congestion warning.
+    This only affects visual congestion-red cells, not fire-red.
+    """
+    eligible = (layout != 1) & (layout != 2) & (fire == 0)
+
+    next_state = prev_state.copy()
+    next_hold_until = hold_until.copy()
+
+    next_state[~eligible] = False
+    next_hold_until[~eligible] = tick
+
+    can_flip = (tick >= next_hold_until)
+
+    turn_on = eligible & (~next_state) & can_flip & (crowd >= CONGESTION_RED_ON)
+    turn_off = eligible & next_state & can_flip & (crowd <= CONGESTION_RED_OFF)
+
+    next_state[turn_on] = True
+    next_hold_until[turn_on] = tick + CONGESTION_HOLD_TICKS
+
+    next_state[turn_off] = False
+    next_hold_until[turn_off] = tick + CONGESTION_HOLD_TICKS
+
+    return next_state, next_hold_until
+
+
+def build_light_field_density_aware(
+    layout: np.ndarray,
+    fire: np.ndarray,
+    corridor_mask: np.ndarray,
+    congestion_red_state: np.ndarray,
+) -> np.ndarray:
+    """
+    Priority:
+    1) fire red (hard override)
+    2) corridor white
+    3) sustained congestion red, but only off-corridor
+    """
+    light = np.zeros(layout.shape, dtype=np.float32)
+
+    fire_cells = np.argwhere(fire == 1)
+    if len(fire_cells) > 0:
+        fire_mask = manhattan_circle_mask_fast(fire_cells, layout.shape, FIRE_RADIUS)
+        light[np.where(fire_mask & (layout != 1))] = 1.0
+
+    corridor_white = corridor_mask & (layout != 1) & (layout != 2) & (fire == 0) & (light != 1.0)
+    light[np.where(corridor_white)] = -1.0
+
+    congestion_red = (
+        congestion_red_state
+        & (layout != 1)
+        & (layout != 2)
+        & (fire == 0)
+        & (~corridor_mask)
+        & (light != 1.0)
+    )
+    light[np.where(congestion_red)] = 1.0
+
+    return light
+
+
+def density_penalty(crowd_value: float) -> float:
+    excess = max(0.0, float(crowd_value) - float(DENSITY_COST_SOFT))
+    return DENSITY_COST_ALPHA * (excess ** DENSITY_COST_POWER)
 
 
 # ============================================================
@@ -218,9 +297,9 @@ def light_grid_to_delta(prev: np.ndarray, curr: np.ndarray) -> List[List[Any]]:
 
     for x, y in changes:
         v = curr[x, y]
-        if v == -1:
+        if np.isclose(v, -1.0):
             out.append([int(x), int(y), "WHITE"])
-        elif v == 1:
+        elif np.isclose(v, 1.0):
             out.append([int(x), int(y), "RED"])
         else:
             out.append([int(x), int(y), "OFF"])

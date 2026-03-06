@@ -18,22 +18,16 @@ from stable_baselines3 import PPO
 
 from evac_core import (
     AUTO_ACTION,
-    DENSITY_LIMIT,
-    FIRE_RADIUS,
     MAX_EXITS,
     N_ACTIONS,
     bfs_distance_map_from_sources,
     build_guidance_corridor_mask,
+    build_light_field_density_aware,
     light_grid_to_delta,
-    manhattan_circle_mask_fast,
+    update_congestion_state,
 )
 
 TTL_MS = 500
-
-# --- New density / anti-flicker logic ---
-CONGESTION_RED_ON = max(5, DENSITY_LIMIT + 2)
-CONGESTION_RED_OFF = max(4, DENSITY_LIMIT + 1)
-CONGESTION_HOLD_TICKS = 3
 
 app = FastAPI()
 
@@ -88,17 +82,25 @@ def parse_layout(
 ) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
     layout = np.zeros((w, h), dtype=np.float32)
 
-    for x, y in walls:
-        x, y = int(x), int(y)
+    for pair in walls:
+        if len(pair) != 2:
+            raise ValueError(f"wall cell must have 2 coordinates, got {pair}")
+        x, y = int(pair[0]), int(pair[1])
         if 0 <= x < w and 0 <= y < h:
             layout[x, y] = 1.0
 
     exit_list: List[Tuple[int, int]] = []
-    for x, y in exits:
-        x, y = int(x), int(y)
+    seen = set()
+    for pair in exits:
+        if len(pair) != 2:
+            raise ValueError(f"exit cell must have 2 coordinates, got {pair}")
+        x, y = int(pair[0]), int(pair[1])
         if 0 <= x < w and 0 <= y < h and layout[x, y] != 1.0:
-            layout[x, y] = 2.0
-            exit_list.append((x, y))
+            key = (x, y)
+            if key not in seen:
+                layout[x, y] = 2.0
+                exit_list.append(key)
+                seen.add(key)
 
     if len(exit_list) == 0:
         raise ValueError("INIT must include at least one exit.")
@@ -116,12 +118,14 @@ def apply_tick_update(st: SessionState, msg: Dict[str, Any]) -> None:
         g = np.array(msg["crowd_full"], dtype=np.float32)
         if g.shape != (w, h):
             raise ValueError(f"crowd_full must be shape ({w}, {h})")
-        st.crowd = g
+        st.crowd = np.maximum(g, 0.0)
     else:
-        for x, y, c in msg.get("crowd_delta", []):
-            x, y = int(x), int(y)
+        for triple in msg.get("crowd_delta", []):
+            if len(triple) != 3:
+                raise ValueError(f"crowd_delta entry must have 3 values, got {triple}")
+            x, y, c = int(triple[0]), int(triple[1]), float(triple[2])
             if 0 <= x < w and 0 <= y < h:
-                st.crowd[x, y] = float(c)
+                st.crowd[x, y] = max(c, 0.0)
 
     if "fire_full" in msg:
         g = np.array(msg["fire_full"], dtype=np.float32)
@@ -129,75 +133,23 @@ def apply_tick_update(st: SessionState, msg: Dict[str, Any]) -> None:
             raise ValueError(f"fire_full must be shape ({w}, {h})")
         st.fire = (g > 0).astype(np.float32)
     else:
-        for x, y in msg.get("fire_on", []):
-            x, y = int(x), int(y)
+        for pair in msg.get("fire_on", []):
+            if len(pair) != 2:
+                raise ValueError(f"fire_on entry must have 2 values, got {pair}")
+            x, y = int(pair[0]), int(pair[1])
             if 0 <= x < w and 0 <= y < h:
                 st.fire[x, y] = 1.0
-        for x, y in msg.get("fire_off", []):
-            x, y = int(x), int(y)
+        for pair in msg.get("fire_off", []):
+            if len(pair) != 2:
+                raise ValueError(f"fire_off entry must have 2 values, got {pair}")
+            x, y = int(pair[0]), int(pair[1])
             if 0 <= x < w and 0 <= y < h:
                 st.fire[x, y] = 0.0
 
-
-def update_congestion_state(
-    layout: np.ndarray,
-    fire: np.ndarray,
-    crowd: np.ndarray,
-    prev_state: np.ndarray,
-    hold_until: np.ndarray,
-    tick: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    eligible = (layout != 1) & (layout != 2) & (fire == 0)
-
-    next_state = prev_state.copy()
-    next_hold_until = hold_until.copy()
-
-    next_state[~eligible] = False
-    next_hold_until[~eligible] = tick
-
-    can_flip = (tick >= next_hold_until)
-
-    turn_on = eligible & (~next_state) & can_flip & (crowd >= CONGESTION_RED_ON)
-    turn_off = eligible & next_state & can_flip & (crowd <= CONGESTION_RED_OFF)
-
-    next_state[turn_on] = True
-    next_hold_until[turn_on] = tick + CONGESTION_HOLD_TICKS
-
-    next_state[turn_off] = False
-    next_hold_until[turn_off] = tick + CONGESTION_HOLD_TICKS
-
-    return next_state, next_hold_until
-
-
-def build_light_field_density_aware(
-    layout: np.ndarray,
-    fire: np.ndarray,
-    crowd: np.ndarray,
-    corridor_mask: np.ndarray,
-    congestion_red_state: np.ndarray,
-) -> np.ndarray:
-    w, h = layout.shape
-    light = np.zeros((w, h), dtype=np.float32)
-
-    fire_cells = np.argwhere(fire == 1)
-    if len(fire_cells) > 0:
-        fire_mask = manhattan_circle_mask_fast(fire_cells, layout.shape, FIRE_RADIUS)
-        light[np.where(fire_mask & (layout != 1))] = 1.0
-
-    corridor_white = corridor_mask & (layout != 1) & (layout != 2) & (fire == 0) & (light != 1.0)
-    light[np.where(corridor_white)] = -1.0
-
-    congestion_red = (
-        congestion_red_state
-        & (layout != 1)
-        & (layout != 2)
-        & (fire == 0)
-        & (~corridor_mask)
-        & (light != 1.0)
-    )
-    light[np.where(congestion_red)] = 1.0
-
-    return light
+    st.crowd[st.layout == 1] = 0.0
+    st.crowd[st.layout == 2] = 0.0
+    st.fire[st.layout == 1] = 0.0
+    st.fire[st.layout == 2] = 0.0
 
 
 def choose_action(st: SessionState) -> int:
@@ -246,7 +198,6 @@ def compute_light(st: SessionState, action: int, tick: int) -> Tuple[np.ndarray,
     light = build_light_field_density_aware(
         st.layout,
         st.fire,
-        st.crowd,
         corridor,
         st.congestion_red_state,
     )
@@ -338,7 +289,13 @@ async def ws_endpoint(ws: WebSocket):
 
                 st = SESSIONS[sid]
                 t = int(msg.get("t", st.last_t + 1))
-                st.last_t = t
+
+                if t <= st.last_t:
+                    await ws.send_text(json.dumps({
+                        "type": "error",
+                        "message": f"stale tick: got {t}, last_t was {st.last_t}",
+                    }))
+                    continue
 
                 try:
                     apply_tick_update(st, msg)
@@ -346,6 +303,7 @@ async def ws_endpoint(ws: WebSocket):
                     light, eff, mode = compute_light(st, action, t)
                     delta = light_grid_to_delta(st.light_prev, light)
                     st.light_prev = light
+                    st.last_t = t
 
                     now_ms = int(time.time() * 1000)
                     out = {
