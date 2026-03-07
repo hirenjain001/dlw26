@@ -42,6 +42,19 @@ export class Link {
         this.prevFire = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
     }
 
+    private rectToCenterCell(rect: Rect): [number, number] {
+        const cellW = this.canvasW / this.gridSize;
+        const cellH = this.canvasH / this.gridSize;
+
+        const centerX = rect.x + rect.w / 2;
+        const centerY = rect.y + rect.h / 2;
+
+        const gx = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(centerX / cellW)));
+        const gy = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(centerY / cellH)));
+
+        return [gx, gy];
+    }
+
     private rectToCells(rect: Rect): [number, number][] {
         const cellW = this.canvasW / this.gridSize;
         const cellH = this.canvasH / this.gridSize;
@@ -62,12 +75,14 @@ export class Link {
     }
 
     public generateInit(walls: Rect[], exits: Rect[]): InitPayload {
-        // Use Sets to automatically remove duplicate [x, y] coordinates if rectangles overlap
         const wallSet = new Set<string>();
         walls.forEach(w => this.rectToCells(w).forEach(c => wallSet.add(`${c[0]},${c[1]}`)));
 
         const exitSet = new Set<string>();
-        exits.forEach(e => this.rectToCells(e).forEach(c => exitSet.add(`${c[0]},${c[1]}`)));
+        exits.forEach(e => {
+            const [x, y] = this.rectToCenterCell(e);
+            exitSet.add(`${x},${y}`);
+        });
 
         return {
             type: "init",
