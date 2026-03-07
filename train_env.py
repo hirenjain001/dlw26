@@ -21,7 +21,8 @@ from evac_core import (
     DIRS,
     MAX_EXITS,
     N_ACTIONS,
-    bfs_distance_map_from_sources,
+    bfs_distance_map_fire_aware,
+    build_fire_danger_mask,
     build_guidance_corridor_mask,
     build_light_field_density_aware,
     density_penalty,
@@ -155,6 +156,8 @@ def move_crowd(
     new = np.zeros_like(crowd, dtype=np.float32)
     evac = 0.0
 
+    danger_mask = build_fire_danger_mask(layout, fire)
+
     occupied = np.argwhere(crowd > 0)
     if len(occupied) == 0:
         return new, evac
@@ -175,7 +178,7 @@ def move_crowd(
             nx, ny = int(x + dx), int(y + dy)
             if nx < 0 or nx >= w or ny < 0 or ny >= h:
                 continue
-            if layout[nx, ny] == 1 or fire[nx, ny] == 1:
+            if layout[nx, ny] == 1 or danger_mask[nx, ny]:
                 continue
             if layout[nx, ny] == 2:
                 best_pos = (nx, ny)
@@ -248,17 +251,10 @@ class TrainEnv(gym.Env):
         self.crowd = np.zeros((self.w, self.h), dtype=np.float32)
         self.light = np.zeros((self.w, self.h), dtype=np.float32)
 
-        self.dist_nearest = np.full((self.w, self.h), 999, dtype=np.float32)
-        self.dist_per_exit: List[np.ndarray] = []
+        self.steps = 0
 
         self.congestion_red_state = np.zeros((self.w, self.h), dtype=bool)
         self.congestion_hold_until = np.zeros((self.w, self.h), dtype=np.int32)
-
-        self.steps = 0
-
-    def _recompute_dist(self) -> None:
-        self.dist_nearest = bfs_distance_map_from_sources(self.layout, self.exits)
-        self.dist_per_exit = [bfs_distance_map_from_sources(self.layout, [ex]) for ex in self.exits]
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
         return {
@@ -267,6 +263,11 @@ class TrainEnv(gym.Env):
             "light": self.light.astype(np.float32),
             "crowd": self.crowd.astype(np.float32),
         }
+
+    def _compute_fire_aware_maps(self) -> Tuple[np.ndarray, List[np.ndarray]]:
+        dist_nearest = bfs_distance_map_fire_aware(self.layout, self.fire, self.exits)
+        dist_per_exit = [bfs_distance_map_fire_aware(self.layout, self.fire, [ex]) for ex in self.exits]
+        return dist_nearest, dist_per_exit
 
     def reset(self, seed: Optional[int] = None, options=None):
         super().reset(seed=seed)
@@ -277,7 +278,6 @@ class TrainEnv(gym.Env):
         self.seed_base = int(seed)
 
         self.layout, self.exits, self.fire = generate_training_scenario(self.seed_base, self.w, self.h)
-        self._recompute_dist()
         self.crowd = spawn_people(self.seed_base + 12345, self.layout, self.n_people)
         self.light[:, :] = 0.0
         self.congestion_red_state[:, :] = False
@@ -289,12 +289,14 @@ class TrainEnv(gym.Env):
         self.steps += 1
         action = int(action)
 
+        dist_nearest, dist_per_exit = self._compute_fire_aware_maps()
+
         if action == AUTO_ACTION or action >= len(self.exits):
-            dist_target = self.dist_nearest
+            dist_target = dist_nearest
             effective = AUTO_ACTION
             mode = "AUTO_NEAREST"
         else:
-            dist_target = self.dist_per_exit[action]
+            dist_target = dist_per_exit[action]
             effective = action
             mode = "GUIDE_EXIT"
 

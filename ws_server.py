@@ -20,6 +20,7 @@ from evac_core import (
     AUTO_ACTION,
     MAX_EXITS,
     N_ACTIONS,
+    bfs_distance_map_fire_aware,
     bfs_distance_map_from_sources,
     build_guidance_corridor_mask,
     build_light_field_density_aware,
@@ -174,13 +175,21 @@ def choose_action(st: SessionState) -> int:
     return a
 
 
+def compute_fire_aware_maps(st: SessionState) -> Tuple[np.ndarray, List[np.ndarray]]:
+    dist_nearest = bfs_distance_map_fire_aware(st.layout, st.fire, st.exits)
+    dist_per_exit = [bfs_distance_map_fire_aware(st.layout, st.fire, [ex]) for ex in st.exits]
+    return dist_nearest, dist_per_exit
+
+
 def compute_light(st: SessionState, action: int, tick: int) -> Tuple[np.ndarray, int, str]:
+    dist_nearest, dist_per_exit = compute_fire_aware_maps(st)
+
     if action == AUTO_ACTION or action >= len(st.exits):
-        dist_target = st.dist_nearest
+        dist_target = dist_nearest
         eff = AUTO_ACTION
         mode = "AUTO_NEAREST"
     else:
-        dist_target = st.dist_per_exit[action]
+        dist_target = dist_per_exit[action]
         eff = action
         mode = "GUIDE_EXIT"
 
@@ -247,6 +256,8 @@ async def ws_endpoint(ws: WebSocket):
 
                 try:
                     layout, exit_list = parse_layout(walls, exits, w, h)
+
+                    # keep static maps for reference/debug; actual routing is recomputed fire-aware each tick
                     dist_nearest = bfs_distance_map_from_sources(layout, exit_list)
                     dist_per_exit = [bfs_distance_map_from_sources(layout, [ex]) for ex in exit_list]
 
