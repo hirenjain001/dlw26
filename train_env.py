@@ -43,6 +43,11 @@ R_OVER = -30.0
 R_FAIL_TIMEOUT = -500.0
 R_NO_GUIDE = -0.25
 
+# Dense shaping reward:
+# reward the agent when total crowd-weighted distance to exit decreases.
+# Keep this small so it helps learning without dominating the main objective.
+PROGRESS_REWARD_ALPHA = 0.02
+
 
 def make_border_walls(w: int, h: int) -> np.ndarray:
     layout = np.zeros((w, h), dtype=np.float32)
@@ -318,7 +323,20 @@ class TrainEnv(gym.Env):
             self.congestion_red_state,
         )
 
-        self.crowd, evacuated = move_crowd(self.layout, self.fire, self.light, self.crowd, dist_target)
+        # Dense shaping: reward reduction in total crowd-weighted distance to target exits.
+        # Clamp unreachable cells at 999 to keep the scale bounded and consistent.
+        prev_progress = float(np.sum(self.crowd * np.minimum(dist_target, 999.0)))
+
+        self.crowd, evacuated = move_crowd(
+            self.layout,
+            self.fire,
+            self.light,
+            self.crowd,
+            dist_target,
+        )
+
+        new_progress = float(np.sum(self.crowd * np.minimum(dist_target, 999.0)))
+        progress_reward = PROGRESS_REWARD_ALPHA * (prev_progress - new_progress)
 
         step_seed = self.seed_base + self.steps * 9973
         self.fire = spread_fire(self.layout, self.fire, step_seed)
@@ -335,6 +353,7 @@ class TrainEnv(gym.Env):
             + R_BURN * burned
             + R_STEP
             + R_OVER * overcrowd_cost
+            + progress_reward
             + (R_NO_GUIDE if effective == AUTO_ACTION else 0.0)
         )
 
@@ -350,6 +369,7 @@ class TrainEnv(gym.Env):
             "effective_action": effective,
             "remaining": float(np.sum(self.crowd)),
             "n_congestion_red": int(np.sum(self.congestion_red_state)),
+            "progress_reward": float(progress_reward),
         }
         return obs, float(reward), terminated, truncated, info
 
@@ -377,6 +397,7 @@ def save_model_metadata(model_path: str, width: int, height: int, n_people: int,
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, default="evac_light_ppo.zip")
+    p.add_argument("--resume_from", type=str, default=None)
     p.add_argument("--timesteps", type=int, default=200_000)
     p.add_argument("--seed", type=int, default=0)
 
@@ -409,7 +430,8 @@ def main():
         raise ValueError("batch_size must be at least 1.")
 
     if args.run_name is None:
-        args.run_name = f"ppo_{args.width}x{args.height}_{int(time.time())}"
+        suffix = "resume" if args.resume_from is not None else "fresh"
+        args.run_name = f"ppo_{args.width}x{args.height}_{suffix}_{int(time.time())}"
 
     device = args.device
     if device == "cuda" and not torch.cuda.is_available():
@@ -425,6 +447,7 @@ def main():
     print(f"Timesteps: {args.timesteps}")
     print(f"Num envs: {args.num_envs}")
     print(f"Model output: {args.model}")
+    print(f"Resume from: {args.resume_from}")
     print(f"TensorBoard log dir: {args.tensorboard_log}")
     print(f"Run name: {args.run_name}")
 
@@ -451,24 +474,40 @@ def main():
         net_arch=dict(pi=[256, 256], vf=[256, 256])
     )
 
-    model = PPO(
-        policy="MultiInputPolicy",
-        env=env,
-        verbose=1,
-        learning_rate=args.learning_rate,
-        n_steps=args.n_steps,
-        batch_size=args.batch_size,
-        gamma=args.gamma,
-        device=device,
-        tensorboard_log=args.tensorboard_log,
-        policy_kwargs=policy_kwargs,
-    )
+    if args.resume_from is not None:
+        print(f"Resuming training from: {args.resume_from}")
+        model = PPO.load(
+            args.resume_from,
+            env=env,
+            device=device,
+            tensorboard_log=args.tensorboard_log,
+        )
+
+        # Keep these aligned with the current run config after loading.
+        model.learning_rate = args.learning_rate
+        model.n_steps = args.n_steps
+        model.batch_size = args.batch_size
+        model.gamma = args.gamma
+    else:
+        model = PPO(
+            policy="MultiInputPolicy",
+            env=env,
+            verbose=1,
+            learning_rate=args.learning_rate,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            gamma=args.gamma,
+            device=device,
+            tensorboard_log=args.tensorboard_log,
+            policy_kwargs=policy_kwargs,
+        )
 
     print("Training started...")
     model.learn(
         total_timesteps=args.timesteps,
         callback=checkpoint_callback,
         tb_log_name=args.run_name,
+        reset_num_timesteps=False,
     )
 
     model.save(args.model)
