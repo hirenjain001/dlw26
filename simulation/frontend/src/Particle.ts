@@ -1,3 +1,5 @@
+import { GRID_SIZE } from "../src/config/grid";
+
 export interface Rect { x: number; y: number; w: number; h: number; dirX?: number; dirY?: number; }
 
 export class Particle {
@@ -11,8 +13,8 @@ export class Particle {
     constructor(x: number, y: number) {
         this.x = x; this.y = y;
         this.vx = 0; this.vy = 0; this.ax = 0; this.ay = 0;
-        this.maxSpeed = 2 + Math.random() * 1.5; 
-        this.maxForce = 0.05; 
+        this.maxSpeed = 3 + Math.random() * 2; 
+        this.maxForce = 0.08; 
         this.radius = 3;
         this.baseColor = '#00ffff'; 
         this.crushColor = '#ff0000'; 
@@ -39,16 +41,16 @@ export class Particle {
         let steerX = 0; let steerY = 0;
         let whiteCount = 0; let redCount = 0;
 
-        const myCol = Math.max(0, Math.min(19, Math.floor(this.x / cellW)));
-        const myRow = Math.max(0, Math.min(19, Math.floor(this.y / cellH)));
+        const myCol = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.x / cellW)));
+        const myRow = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.y / cellH)));
 
         const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
 
-        const searchRadius = 2; 
+        const searchRadius = 4; // fix 67: search radius changed from 2 to 4
         const startX = Math.max(0, myCol - searchRadius);
-        const endX = Math.min(19, myCol + searchRadius);
+        const endX = Math.min(GRID_SIZE-1, myCol + searchRadius);
         const startY = Math.max(0, myRow - searchRadius);
-        const endY = Math.min(19, myRow + searchRadius);
+        const endY = Math.min(GRID_SIZE-1, myRow + searchRadius);
 
         for (let x = startX; x <= endX; x++) {
             for (let y = startY; y <= endY; y++) {
@@ -70,8 +72,9 @@ export class Particle {
                         whiteCount++;
                     } else if (cellColor === "RED") {
                         const weight = 1 / dist;
-                        steerX -= (dx / dist) * weight * 3.5; 
-                        steerY -= (dy / dist) * weight * 3.5;
+                        // fix 6767: change from 3.5 -> 5.5 -> Stronger Fire Avoidance (Better Crowd Behaviour)
+                        steerX -= (dx / dist) * weight * 5.5; 
+                        steerY -= (dy / dist) * weight * 5.5;
                         redCount++;
                     }
                 }
@@ -164,7 +167,7 @@ export class Particle {
             repulseY = (repulseY / mag) * this.maxSpeed - this.vy;
             
             // Make the wall push significantly stronger than the compass pull
-            const repulseForce = this.maxForce * 3.0; 
+            const repulseForce = this.maxForce * 0.8; 
             const forceMag = Math.hypot(repulseX, repulseY);
             if (forceMag > repulseForce) {
                 repulseX = (repulseX / forceMag) * repulseForce;
@@ -201,7 +204,7 @@ export class Particle {
             if (mag > 0) {
                 steerX = (steerX / mag) * this.maxSpeed - this.vx;
                 steerY = (steerY / mag) * this.maxSpeed - this.vy;
-                const repulseForce = this.maxForce * 1.5; 
+                const repulseForce = this.maxForce * 1.2; // changed from 1.5 to 1.2
                 const steerMag = Math.sqrt(steerX * steerX + steerY * steerY);
                 if (steerMag > repulseForce) {
                     steerX = (steerX / steerMag) * repulseForce;
@@ -215,28 +218,49 @@ export class Particle {
     keepInBounds(width: number, height: number) {
         if (this.x - this.radius < 0) {
             this.x = this.radius;
-            this.vx *= -0.5; // Bounce off the left wall
+            this.vx *= 0.0; // Bounce off the left wall
         } else if (this.x + this.radius > width) {
             this.x = width - this.radius;
-            this.vx *= -0.5; // Bounce off the right wall
+            this.vx *= 0.0; // Bounce off the right wall
         }
 
         if (this.y - this.radius < 0) {
             this.y = this.radius;
-            this.vy *= -0.5; // Bounce off the ceiling
+            this.vy *= 0.0; // Bounce off the ceiling --> changed from -0.5 to 0 for all 
         } else if (this.y + this.radius > height) {
             this.y = height - this.radius;
-            this.vy *= -0.5; // Bounce off the floor
+            this.vy *= 0.0; // Bounce off the floor
         }
     }
-
+    // change made here 
     update() {
-        this.vx += this.ax; this.vy += this.ay;
-        this.x += this.vx; this.y += this.vy;
-        this.ax = 0; this.ay = 0;
+        this.vx += this.ax;
+        this.vy += this.ay;
+
+        const speed = Math.hypot(this.vx, this.vy);
+        const maxStepSpeed = 2.2;
+
+        if (speed > maxStepSpeed) {
+            this.vx = (this.vx / speed) * maxStepSpeed;
+            this.vy = (this.vy / speed) * maxStepSpeed;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        this.ax = 0;
+        this.ay = 0;
     }
 
     draw(ctx: CanvasRenderingContext2D) {
+        // Change 3: Draw pressure halo if crowding -> Crowd Pressure Visualisation
+        if (this.color === this.crushColor) {
+            ctx.fillStyle = "rgba(255,80,0,0.15)";
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius * 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
         ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);

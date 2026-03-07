@@ -4,6 +4,8 @@ import { Link } from '../../../Link';
 import { socket } from "../api/evacSocket";
 import { getLightGrid, resetLightGrid } from "../state/lightGrid";
 import { getScenarios } from '../Scenarios';
+import { GRID_SIZE } from "../config/grid";
+
 
 // 1. Replaced 'runway' with 'spawn'
 type DrawMode = 'wall' | 'exit' | 'fire' | 'spawn' | null;
@@ -58,16 +60,19 @@ export const Simulation: React.FC = () => {
         if (!ctx) return;
 
         const render = () => {
+
             ctx.fillStyle = '#0a0a0a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // === AI LIGHT OVERLAY (20x20) ===
-            const lg = getLightGrid();
-            const cellW = canvas.width / 20;
-            const cellH = canvas.height / 20;
+            
 
-            for (let x = 0; x < 20; x++) {
-                for (let y = 0; y < 20; y++) {
+            // === AI LIGHT OVERLAY (40x40) ===
+            const lg = getLightGrid();
+            const cellW = canvas.width / GRID_SIZE;
+            const cellH = canvas.height / GRID_SIZE;
+
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
                     const c = lg[x][y];
                     if (c === "OFF") continue;
 
@@ -75,16 +80,108 @@ export const Simulation: React.FC = () => {
                     const py = y * cellH;
 
                     if (c === "WHITE") {
-                        ctx.shadowBlur = 18;
+                        ctx.shadowBlur = 6;
                         ctx.shadowColor = "rgba(255,255,255,0.9)";
                         ctx.fillStyle = "rgba(255,255,255,0.28)";
                     } else {
-                        ctx.shadowBlur = 12;
+                        ctx.shadowBlur = 4;
                         ctx.shadowColor = "rgba(255,0,0,0.9)";
                         ctx.fillStyle = "rgba(255,0,0,0.30)";
                     }
 
                     ctx.fillRect(px, py, cellW, cellH);
+                    
+                    // added function 1 *** -> Direction Arrows on AI Guidance Lights
+                    if (c === "WHITE" && exits.length > 0) {
+                        const centerX = px + cellW / 2;
+                        const centerY = py + cellH / 2;
+
+                        // Find nearest exit to this tile
+                        let nearestExit = exits[0];
+                        let nearestExitDist = Infinity;
+
+                        exits.forEach(exit => {
+                            const ex = exit.x + exit.w / 2;
+                            const ey = exit.y + exit.h / 2;
+                            const d = Math.hypot(ex - centerX, ey - centerY);
+                            if (d < nearestExitDist) {
+                                nearestExitDist = d;
+                                nearestExit = exit;
+                            }
+                        });
+
+                        const exitX = nearestExit.x + nearestExit.w / 2;
+                        const exitY = nearestExit.y + nearestExit.h / 2;
+
+                        // Search all 8 neighbours for the best next WHITE tile
+                        const dirs = [
+                            [1, 0], [-1, 0], [0, 1], [0, -1],
+                            [1, 1], [1, -1], [-1, 1], [-1, -1]
+                        ];
+
+                        let bestDirX = 0;
+                        let bestDirY = 0;
+                        let bestScore = Infinity;
+
+                        for (const [dx, dy] of dirs) {
+                            const nx = x + dx;
+                            const ny = y + dy;
+
+                            if (nx < 0 || nx > GRID_SIZE-1 || ny < 0 || ny > GRID_SIZE-1) continue;
+                            if (lg[nx][ny] !== "WHITE") continue;
+
+                            const neighbourCenterX = nx * cellW + cellW / 2;
+                            const neighbourCenterY = ny * cellH + cellH / 2;
+
+                            // Score = how close this neighbouring WHITE tile is to the exit
+                            const score = Math.hypot(exitX - neighbourCenterX, exitY - neighbourCenterY);
+
+                            if (score < bestScore) {
+                                bestScore = score;
+                                bestDirX = dx;
+                                bestDirY = dy;
+                            }
+                        }
+
+                        // Only draw arrow if we found a valid neighbouring WHITE tile
+                        if (bestDirX !== 0 || bestDirY !== 0) {
+                            const mag = Math.hypot(bestDirX, bestDirY);
+                            const dirX = bestDirX / mag;
+                            const dirY = bestDirY / mag;
+
+                            const arrowLength = cellW * 0.35;
+                            const endX = centerX + dirX * arrowLength;
+                            const endY = centerY + dirY * arrowLength;
+
+                            ctx.strokeStyle = "rgba(255,255,255,0.9)";
+                            ctx.fillStyle = "rgba(255,255,255,0.9)";
+                            ctx.lineWidth = 2;
+
+                            // Arrow shaft
+                            ctx.beginPath();
+                            ctx.moveTo(centerX, centerY);
+                            ctx.lineTo(endX, endY);
+                            ctx.stroke();
+
+                            // Arrow head
+                            const headSize = 6;
+                            const angle = Math.atan2(dirY, dirX);
+
+                            ctx.beginPath();
+                            ctx.moveTo(endX, endY);
+                            ctx.lineTo(
+                                endX - headSize * Math.cos(angle - Math.PI / 6),
+                                endY - headSize * Math.sin(angle - Math.PI / 6)
+                            );
+                            ctx.lineTo(
+                                endX - headSize * Math.cos(angle + Math.PI / 6),
+                                endY - headSize * Math.sin(angle + Math.PI / 6)
+                            );
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
+
                     ctx.shadowBlur = 0;
                 }
             }

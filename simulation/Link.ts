@@ -1,4 +1,5 @@
 import {Particle, type Rect} from './frontend/src/Particle';
+import { GRID_SIZE } from "../simulation/frontend/src/config/grid";
 
 export interface InitPayload {
     type: "init";
@@ -23,7 +24,7 @@ export interface TickPayload {
 
 export class Link {
     private sessionId: string = "demo";
-    private gridSize: number = 20;
+    private gridSize: number = GRID_SIZE;
     private canvasW: number;
     private canvasH: number;
     private tickCounter: number = 0;
@@ -36,20 +37,33 @@ export class Link {
         this.canvasW = canvasWidth;
         this.canvasH = canvasHeight;
         
-        // Initialize empty 20x20 grids filled with 0s and false
-        this.prevCrowd = Array.from({ length: 20 }, () => Array(20).fill(0));
-        this.prevFire = Array.from({ length: 20 }, () => Array(20).fill(false));
+        // Initialize empty 40x40 grids filled with 0s and false
+        this.prevCrowd = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
+        this.prevFire = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
+    }
+
+    private rectToCenterCell(rect: Rect): [number, number] {
+        const cellW = this.canvasW / this.gridSize;
+        const cellH = this.canvasH / this.gridSize;
+
+        const centerX = rect.x + rect.w / 2;
+        const centerY = rect.y + rect.h / 2;
+
+        const gx = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(centerX / cellW)));
+        const gy = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(centerY / cellH)));
+
+        return [gx, gy];
     }
 
     private rectToCells(rect: Rect): [number, number][] {
         const cellW = this.canvasW / this.gridSize;
         const cellH = this.canvasH / this.gridSize;
 
-        // Find the start and end grid columns/rows, clamping them between 0 and 19
+        // Find the start and end grid columns/rows, clamping them between 0 and 39
         const startX = Math.max(0, Math.floor(rect.x / cellW));
-        const endX = Math.min(19, Math.floor((rect.x + rect.w) / cellW));
+        const endX = Math.min(GRID_SIZE-1, Math.floor((rect.x + rect.w) / cellW));
         const startY = Math.max(0, Math.floor(rect.y / cellH));
-        const endY = Math.min(19, Math.floor((rect.y + rect.h) / cellH));
+        const endY = Math.min(GRID_SIZE-1, Math.floor((rect.y + rect.h) / cellH));
 
         const cells: [number, number][] = [];
         for (let x = startX; x <= endX; x++) {
@@ -61,12 +75,14 @@ export class Link {
     }
 
     public generateInit(walls: Rect[], exits: Rect[]): InitPayload {
-        // Use Sets to automatically remove duplicate [x, y] coordinates if rectangles overlap
         const wallSet = new Set<string>();
         walls.forEach(w => this.rectToCells(w).forEach(c => wallSet.add(`${c[0]},${c[1]}`)));
 
         const exitSet = new Set<string>();
-        exits.forEach(e => this.rectToCells(e).forEach(c => exitSet.add(`${c[0]},${c[1]}`)));
+        exits.forEach(e => {
+            const [x, y] = this.rectToCenterCell(e);
+            exitSet.add(`${x},${y}`);
+        });
 
         return {
             type: "init",
@@ -85,18 +101,18 @@ export class Link {
         const cellH = this.canvasH / this.gridSize;
 
         // 1. Calculate Current Crowd Grid
-        const currentCrowd = Array.from({ length: 20 }, () => Array(20).fill(0));
+        const currentCrowd = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
         particles.forEach(p => {
             if (p.escaped) return; // Ignore people who left the building
-            const x = Math.max(0, Math.min(19, Math.floor(p.x / cellW)));
-            const y = Math.max(0, Math.min(19, Math.floor(p.y / cellH)));
+            const x = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(p.x / cellW)));
+            const y = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(p.y / cellH)));
             currentCrowd[x][y]++;
         });
 
         // 2. Compare Current Crowd to Previous Crowd (Find the Deltas)
         const crowd_delta: [number, number, number][] = [];
-        for (let x = 0; x < 20; x++) {
-            for (let y = 0; y < 20; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
                 if (currentCrowd[x][y] !== this.prevCrowd[x][y]) {
                     crowd_delta.push([x, y, currentCrowd[x][y]]);
                 }
@@ -104,7 +120,7 @@ export class Link {
         }
 
         // 3. Calculate Current Fire Grid
-        const currentFire = Array.from({ length: 20 }, () => Array(20).fill(false));
+        const currentFire = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
         fires.forEach(f => {
             this.rectToCells(f).forEach(([x, y]) => {
                 currentFire[x][y] = true;
@@ -114,8 +130,8 @@ export class Link {
         // 4. Compare Current Fire to Previous Fire (Find fire_on and fire_off)
         const fire_on: [number, number][] = [];
         const fire_off: [number, number][] = [];
-        for (let x = 0; x < 20; x++) {
-            for (let y = 0; y < 20; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
                 const isNowOn = currentFire[x][y];
                 const wasOn = this.prevFire[x][y];
                 

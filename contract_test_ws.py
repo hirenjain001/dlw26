@@ -122,11 +122,8 @@ async def contract_test(ws_url: str, width: int, height: int):
         assert resp.get("type") == "error", f"Expected stale tick to fail, got {resp}"
         assert "stale tick" in resp.get("message", ""), f"Expected stale tick error, got {resp}"
         print("STALE TICK OK")
-
-        # === OUT-OF-BOUNDS INPUT CONTRACT ===
         oob_tick_msg = {
             "type": "tick",
-            "session_id": "contract_test",
             "t": 5,
             "crowd_delta": [
                 [-1, center_y, 4],
