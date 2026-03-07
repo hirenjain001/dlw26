@@ -14,10 +14,10 @@ DIRS = [(0, 1), (0, -1), (1, 0), (-1, 0)]
 
 # Lights encoding: -1 WHITE, 0 OFF, +1 RED
 FIRE_RADIUS = 1
-FIRE_SAFETY_RADIUS = 2   # NEW: routing avoids fire within this Manhattan radius
+FIRE_SAFETY_RADIUS = 2   # routing avoids fire within this Manhattan radius
 
 DENSITY_LIMIT = 3
-GUIDE_TRACE_STEPS = 18
+GUIDE_TRACE_STEPS = 18   # kept for compatibility, but no longer used as a hard cap
 GUIDE_THICKNESS = 1
 
 MAX_EXITS = 3
@@ -147,6 +147,14 @@ def build_guidance_corridor_mask(
     trace_steps: int = GUIDE_TRACE_STEPS,
     thickness: int = GUIDE_THICKNESS,
 ) -> np.ndarray:
+    """
+    Build a white-light guidance corridor by tracing from every occupied crowd cell
+    downhill on the BFS distance map until the route reaches an exit or gets stuck.
+
+    Note:
+    - trace_steps is kept in the signature for compatibility with existing callers,
+      but the corridor is no longer artificially capped by a fixed number of steps.
+    """
 
     w, h = layout.shape
     corridor = np.zeros((w, h), dtype=bool)
@@ -157,17 +165,19 @@ def build_guidance_corridor_mask(
     if len(start_cells) == 0:
         return corridor
 
-    if len(start_cells) > 60:
-        densities = crowd[start_cells[:, 0], start_cells[:, 1]]
-        idx = np.argsort(-densities)[:60]
-        start_cells = start_cells[idx]
-
     for sx, sy in start_cells:
         x, y = int(sx), int(sy)
+        visited = set()
 
-        for _ in range(trace_steps):
+        while True:
+            if (x, y) in visited:
+                break
+            visited.add((x, y))
 
             if layout[x, y] == 1 or danger_mask[x, y]:
+                break
+
+            if dist_map_target[x, y] >= 999:
                 break
 
             corridor[x, y] = True
@@ -175,7 +185,7 @@ def build_guidance_corridor_mask(
             if layout[x, y] == 2:
                 break
 
-            best = (x, y)
+            best = None
             best_d = dist_map_target[x, y]
 
             for dx, dy in DIRS:
@@ -186,11 +196,12 @@ def build_guidance_corridor_mask(
                 if layout[nx, ny] == 1 or danger_mask[nx, ny]:
                     continue
 
-                if dist_map_target[nx, ny] < best_d:
-                    best_d = dist_map_target[nx, ny]
+                nd = dist_map_target[nx, ny]
+                if nd < best_d:
+                    best_d = nd
                     best = (nx, ny)
 
-            if best == (x, y):
+            if best is None:
                 break
 
             x, y = best
@@ -219,7 +230,8 @@ def build_light_field_density_aware(
         fire_mask = manhattan_circle_mask_fast(fire_cells, layout.shape, FIRE_RADIUS)
         light[np.where(fire_mask & (layout != 1))] = 1.0
 
-    corridor_white = corridor_mask & (layout != 1) & (layout != 2) & (fire == 0) & (light != 1.0)
+    # Include exits in white lighting so the path visually reaches the exit.
+    corridor_white = corridor_mask & (layout != 1) & (fire == 0) & (light != 1.0)
     light[np.where(corridor_white)] = -1.0
 
     congestion_red = (
