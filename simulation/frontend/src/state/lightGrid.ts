@@ -1,7 +1,8 @@
 import type { LightColor, LightDelta } from "../api/protocol";
 
-const W = 20;
-const H = 20;
+
+const W = 40;
+const H = 40;
 
 type Grid = LightColor[][];
 
