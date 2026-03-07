@@ -34,6 +34,27 @@ export const Simulation: React.FC = () => {
     useEffect(() => {
         firesRef.current = fires;
     }, [fires]);
+    
+    // Dynamic fire spread
+    useEffect(() => {
+        // Only run the fire-spreading loop if there is actually a fire on the screen
+        if (fires.length === 0) return;
+
+        const spreadInterval = setInterval(() => {
+            setFires(prevFires => prevFires.map(f => {
+                // Grow the fire by 4 pixels in all directions every tick
+                const growthRate = 4;
+                return {
+                    x: f.x - (growthRate / 2),
+                    y: f.y - (growthRate / 2),
+                    w: f.w + growthRate,
+                    h: f.h + growthRate
+                };
+            }));
+        }, 1500); // Fire expands every 1.5 seconds
+
+        return () => clearInterval(spreadInterval);
+    }, [fires.length > 0]);
 
     useEffect(() => {
         return () => {
