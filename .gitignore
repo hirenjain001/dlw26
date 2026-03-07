@@ -21,7 +21,6 @@ ENV/
 # =========================
 
 # Model files (large)
-*.zip
 *.pt
 *.pth
 *.ckpt

@@ -1,8 +1,9 @@
 import type { LightColor, LightDelta } from "../api/protocol";
+import { GRID_SIZE } from "../config/grid";
 
 
-const W = 40;
-const H = 40;
+const W = GRID_SIZE;
+const H = GRID_SIZE;
 
 type Grid = LightColor[][];
 

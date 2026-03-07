@@ -1,4 +1,5 @@
 # evac_core.py: contains shared logic
+
 from __future__ import annotations
 
 from collections import deque
@@ -22,15 +23,6 @@ GUIDE_THICKNESS = 1
 MAX_EXITS = 3
 AUTO_ACTION = MAX_EXITS
 N_ACTIONS = MAX_EXITS + 1
-
-# --- Density / anti-flicker logic ---
-DENSITY_COST_SOFT = max(1, DENSITY_LIMIT - 1)
-DENSITY_COST_ALPHA = 1.25
-DENSITY_COST_POWER = 2.0
-
-CONGESTION_RED_ON = max(5, DENSITY_LIMIT + 2)
-CONGESTION_RED_OFF = max(4, DENSITY_LIMIT + 1)
-CONGESTION_HOLD_TICKS = 3
 
 
 # ============================================================
@@ -193,7 +185,8 @@ def build_light_field(
     Legacy light field:
     returns light grid float32: -1 white, 0 off, +1 red
     """
-    light = np.zeros(layout.shape, dtype=np.float32)
+    w, h = layout.shape
+    light = np.zeros((w, h), dtype=np.float32)
 
     fire_cells = np.argwhere(fire == 1)
     if len(fire_cells) > 0:

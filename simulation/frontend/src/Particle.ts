@@ -1,3 +1,5 @@
+import { GRID_SIZE } from "../src/config/grid";
+
 export interface Rect { x: number; y: number; w: number; h: number; dirX?: number; dirY?: number; }
 
 export class Particle {
@@ -39,16 +41,16 @@ export class Particle {
         let steerX = 0; let steerY = 0;
         let whiteCount = 0; let redCount = 0;
 
-        const myCol = Math.max(0, Math.min(39, Math.floor(this.x / cellW)));
-        const myRow = Math.max(0, Math.min(39, Math.floor(this.y / cellH)));
+        const myCol = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.x / cellW)));
+        const myRow = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.y / cellH)));
 
         const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
 
         const searchRadius = 4; // fix 67: search radius changed from 2 to 4
         const startX = Math.max(0, myCol - searchRadius);
-        const endX = Math.min(39, myCol + searchRadius);
+        const endX = Math.min(GRID_SIZE-1, myCol + searchRadius);
         const startY = Math.max(0, myRow - searchRadius);
-        const endY = Math.min(39, myRow + searchRadius);
+        const endY = Math.min(GRID_SIZE-1, myRow + searchRadius);
 
         for (let x = startX; x <= endX; x++) {
             for (let y = startY; y <= endY; y++) {

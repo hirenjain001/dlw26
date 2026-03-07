@@ -1,4 +1,5 @@
 # train_env.py: this script generates random scenarios and learns a policy
+
 from __future__ import annotations
 
 import argparse
@@ -19,13 +20,12 @@ from evac_core import (
     AUTO_ACTION,
     DENSITY_LIMIT,
     DIRS,
+    FIRE_RADIUS,
     MAX_EXITS,
     N_ACTIONS,
     bfs_distance_map_from_sources,
     build_guidance_corridor_mask,
-    build_light_field_density_aware,
-    density_penalty,
-    update_congestion_state,
+    manhattan_circle_mask_fast,
 )
 
 # --- Training dynamics / reward ---
@@ -41,6 +41,15 @@ R_STEP = -1.0
 R_OVER = -30.0
 R_FAIL_TIMEOUT = -500.0
 R_NO_GUIDE = -0.25
+
+# --- New density / anti-flicker logic ---
+DENSITY_COST_SOFT = max(1, DENSITY_LIMIT - 1)   # starts penalizing routing above this density
+DENSITY_COST_ALPHA = 1.25
+DENSITY_COST_POWER = 2.0
+
+CONGESTION_RED_ON = max(5, DENSITY_LIMIT + 2)
+CONGESTION_RED_OFF = max(4, DENSITY_LIMIT + 1)
+CONGESTION_HOLD_TICKS = 3
 
 
 def make_border_walls(w: int, h: int) -> np.ndarray:
@@ -69,23 +78,6 @@ def place_random_rect_obstacle(rng: np.random.Generator, layout: np.ndarray) -> 
     layout[x0:x0 + rect_w, y0:y0 + rect_h] = 1.0
 
 
-def ensure_at_least_one_exit(
-    rng: np.random.Generator,
-    layout: np.ndarray,
-    exits: List[Tuple[int, int]],
-) -> None:
-    if exits:
-        return
-
-    walkable = np.argwhere(layout == 0)
-    if len(walkable) == 0:
-        raise ValueError("Failed to generate scenario: no walkable cell available for an exit.")
-
-    x, y = walkable[int(rng.integers(0, len(walkable)))]
-    layout[x, y] = 2.0
-    exits.append((int(x), int(y)))
-
-
 def generate_training_scenario(
     seed: int,
     w: int,
@@ -94,6 +86,7 @@ def generate_training_scenario(
     rng = np.random.default_rng(seed)
     layout = make_border_walls(w, h)
 
+    # obstacles
     n_obstacles = int(rng.integers(4, 11))
     for _ in range(n_obstacles):
         place_random_rect_obstacle(rng, layout)
@@ -108,8 +101,6 @@ def generate_training_scenario(
         if layout[x, y] == 0:
             layout[x, y] = 2.0
             exits.append((x, y))
-
-    ensure_at_least_one_exit(rng, layout, exits)
 
     fire = np.zeros((w, h), dtype=np.float32)
     n_fires = int(rng.integers(1, 4))
@@ -128,7 +119,8 @@ def generate_training_scenario(
 
 def spawn_people(seed: int, layout: np.ndarray, n_people: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    crowd = np.zeros(layout.shape, dtype=np.float32)
+    w, h = layout.shape
+    crowd = np.zeros((w, h), dtype=np.float32)
 
     walkable = np.argwhere(layout == 0)
     if len(walkable) == 0:
@@ -144,6 +136,84 @@ def spawn_people(seed: int, layout: np.ndarray, n_people: int) -> np.ndarray:
     return crowd
 
 
+def update_congestion_state(
+    layout: np.ndarray,
+    fire: np.ndarray,
+    crowd: np.ndarray,
+    prev_state: np.ndarray,
+    hold_until: np.ndarray,
+    tick: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Hysteresis + hold-time for congestion warning.
+    This ONLY affects visual congestion-red cells, not fire-red.
+    """
+    eligible = (layout != 1) & (layout != 2) & (fire == 0)
+
+    next_state = prev_state.copy()
+    next_hold_until = hold_until.copy()
+
+    # Cells that are no longer eligible cannot remain visually congestion-red
+    next_state[~eligible] = False
+    next_hold_until[~eligible] = tick
+
+    can_flip = (tick >= next_hold_until)
+
+    turn_on = eligible & (~next_state) & can_flip & (crowd >= CONGESTION_RED_ON)
+    turn_off = eligible & next_state & can_flip & (crowd <= CONGESTION_RED_OFF)
+
+    next_state[turn_on] = True
+    next_hold_until[turn_on] = tick + CONGESTION_HOLD_TICKS
+
+    next_state[turn_off] = False
+    next_hold_until[turn_off] = tick + CONGESTION_HOLD_TICKS
+
+    return next_state, next_hold_until
+
+
+def build_light_field_density_aware(
+    layout: np.ndarray,
+    fire: np.ndarray,
+    crowd: np.ndarray,
+    corridor_mask: np.ndarray,
+    congestion_red_state: np.ndarray,
+) -> np.ndarray:
+    """
+    Priority:
+    1) fire red (hard override)
+    2) corridor white
+    3) sustained congestion red, but ONLY off-corridor to avoid contradictory guidance
+    """
+    w, h = layout.shape
+    light = np.zeros((w, h), dtype=np.float32)
+
+    fire_cells = np.argwhere(fire == 1)
+    if len(fire_cells) > 0:
+        fire_mask = manhattan_circle_mask_fast(fire_cells, layout.shape, FIRE_RADIUS)
+        light[np.where(fire_mask & (layout != 1))] = 1.0
+
+    corridor_white = corridor_mask & (layout != 1) & (layout != 2) & (fire == 0) & (light != 1.0)
+    light[np.where(corridor_white)] = -1.0
+
+    # Only show congestion red outside the active white corridor
+    congestion_red = (
+        congestion_red_state
+        & (layout != 1)
+        & (layout != 2)
+        & (fire == 0)
+        & (~corridor_mask)
+        & (light != 1.0)
+    )
+    light[np.where(congestion_red)] = 1.0
+
+    return light
+
+
+def density_penalty(crowd_value: float) -> float:
+    excess = max(0.0, float(crowd_value) - float(DENSITY_COST_SOFT))
+    return DENSITY_COST_ALPHA * (excess ** DENSITY_COST_POWER)
+
+
 def move_crowd(
     layout: np.ndarray,
     fire: np.ndarray,
@@ -156,23 +226,13 @@ def move_crowd(
     evac = 0.0
 
     occupied = np.argwhere(crowd > 0)
-    if len(occupied) == 0:
-        return new, evac
-
-    densities = crowd[occupied[:, 0], occupied[:, 1]]
-    order = np.argsort(-densities)
-    occupied = occupied[order]
-
     for x, y in occupied:
-        count = float(crowd[x, y])
-        if count <= 0:
-            continue
-
+        count = crowd[x, y]
         best_score = 1e9
         best_pos = (int(x), int(y))
 
         for dx, dy in DIRS:
-            nx, ny = int(x + dx), int(y + dy)
+            nx, ny = x + dx, y + dy
             if nx < 0 or nx >= w or ny < 0 or ny >= h:
                 continue
             if layout[nx, ny] == 1 or fire[nx, ny] == 1:
@@ -182,11 +242,10 @@ def move_crowd(
                 best_score = -1e9
                 break
 
-            projected_density = float(crowd[nx, ny] + new[nx, ny] + count)
             score = (
-                float(dist_map[nx, ny])
-                + (LIGHT_ALPHA * float(light[nx, ny]))
-                + density_penalty(projected_density)
+                dist_map[nx, ny]
+                + (LIGHT_ALPHA * light[nx, ny])
+                + density_penalty(crowd[nx, ny])
             )
 
             if score < best_score:
@@ -210,7 +269,7 @@ def spread_fire(layout: np.ndarray, fire: np.ndarray, seed_for_step: int) -> np.
     burning = np.argwhere(fire == 1)
     for fx, fy in burning:
         for dx, dy in DIRS:
-            nx, ny = int(fx + dx), int(fy + dy)
+            nx, ny = fx + dx, fy + dy
             if nx < 0 or nx >= w or ny < 0 or ny >= h:
                 continue
             if layout[nx, ny] != 0:
@@ -312,6 +371,7 @@ class TrainEnv(gym.Env):
         self.light = build_light_field_density_aware(
             self.layout,
             self.fire,
+            self.crowd,
             corridor,
             self.congestion_red_state,
         )
@@ -336,8 +396,8 @@ class TrainEnv(gym.Env):
             + (R_NO_GUIDE if effective == AUTO_ACTION else 0.0)
         )
 
-        terminated = bool(np.sum(self.crowd) <= 0.0)
-        truncated = bool(self.steps >= MAX_STEPS)
+        terminated = (np.sum(self.crowd) <= 0.0)
+        truncated = (self.steps >= MAX_STEPS)
 
         if truncated and not terminated:
             reward += R_FAIL_TIMEOUT
@@ -399,12 +459,6 @@ def main():
 
     if args.width < 3 or args.height < 3:
         raise ValueError("width and height must both be at least 3.")
-    if args.num_envs < 1:
-        raise ValueError("num_envs must be at least 1.")
-    if args.n_steps < 1:
-        raise ValueError("n_steps must be at least 1.")
-    if args.batch_size < 1:
-        raise ValueError("batch_size must be at least 1.")
 
     if args.run_name is None:
         args.run_name = f"ppo_{args.width}x{args.height}_{int(time.time())}"

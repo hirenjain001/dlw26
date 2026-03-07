@@ -4,6 +4,8 @@ import { Link } from '../../../Link';
 import { socket } from "../api/evacSocket";
 import { getLightGrid, resetLightGrid } from "../state/lightGrid";
 import { getScenarios } from '../Scenarios';
+import { GRID_SIZE } from "../config/grid";
+
 
 // 1. Replaced 'runway' with 'spawn'
 type DrawMode = 'wall' | 'exit' | 'fire' | 'spawn' | null;
@@ -66,11 +68,11 @@ export const Simulation: React.FC = () => {
 
             // === AI LIGHT OVERLAY (40x40) ===
             const lg = getLightGrid();
-            const cellW = canvas.width / 40;
-            const cellH = canvas.height / 40;
+            const cellW = canvas.width / GRID_SIZE;
+            const cellH = canvas.height / GRID_SIZE;
 
-            for (let x = 0; x < 40; x++) {
-                for (let y = 0; y < 40; y++) {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
                     const c = lg[x][y];
                     if (c === "OFF") continue;
 
@@ -125,7 +127,7 @@ export const Simulation: React.FC = () => {
                             const nx = x + dx;
                             const ny = y + dy;
 
-                            if (nx < 0 || nx > 39 || ny < 0 || ny > 39) continue;
+                            if (nx < 0 || nx > GRID_SIZE-1 || ny < 0 || ny > GRID_SIZE-1) continue;
                             if (lg[nx][ny] !== "WHITE") continue;
 
                             const neighbourCenterX = nx * cellW + cellW / 2;
