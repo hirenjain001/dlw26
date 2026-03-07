@@ -80,7 +80,7 @@ The frontend is a custom-built, continuous 60fps 2D physics engine serving as th
 
 #### 1. Simulation.tsx (The Digital Twin Dashboard)
 * **Interactive Tooling:** Features a God-Mode UI allowing users to dynamically draw `Walls`, `Exits`, `Fires`, and targeted `Spawn Zones` directly onto the HTML5 Canvas.
-* **Pitch Scenarios:** Includes pre-loaded architectural challenges (e.g., *The Bottleneck*, *Fire Reroute*, *Office Maze*) that dynamically scale to the screen size for one-click live demonstrations.
+* **Pitch Scenarios:** Includes pre-loaded architectural challenges (e.g., *Obstacle Course*, *Office Maze*, and even a *Sandbox Mode*) that dynamically scale to the screen size for one-click live demonstrations.
 * **Performance:** Utilizes `useRef` and direct DOM manipulation to maintain 60fps rendering without triggering React re-renders.
 
 #### 2. Particle.ts (The Swarm Brain & Physics)
