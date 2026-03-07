@@ -1,0 +1,9 @@
+{
+  "width": 20,
+  "height": 20,
+  "n_people": 120,
+  "max_exits": 3,
+  "n_actions": 4,
+  "num_envs": 1,
+  "saved_at_unix": 1772813235
+}
