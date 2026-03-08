@@ -1,5 +1,3 @@
-import { GRID_SIZE } from "../src/config/grid";
-
 export interface Rect { x: number; y: number; w: number; h: number; dirX?: number; dirY?: number; }
 
 export class Particle {
