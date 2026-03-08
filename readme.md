@@ -4,6 +4,14 @@ This project provides a complete digital twin for emergency evacuation. It featu
 
 The system receives live crowd density and fire updates from the frontend and returns per-cell lighting commands (**WHITE** / **RED** / **OFF**).
 
+# Demo
+
+
+
+https://github.com/user-attachments/assets/327cbdea-56d8-40e6-9023-11e07ce50ff8
+
+
+
 ## Architecture Overview
 
 ```text
