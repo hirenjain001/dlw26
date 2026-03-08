@@ -38,20 +38,26 @@ export class Particle {
         });
     }
 
-    applyLightGrid(lightGrid: string[][], cellW: number, cellH: number, exits: Rect[]) {
+    applyLightGrid(lightGrid: string[][], distMap: number[][], cellW: number, cellH: number, exits: Rect[]) {
         let steerX = 0; let steerY = 0;
-        let whiteCount = 0; let redCount = 0;
+        let redCount = 0;
 
-        const myCol = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.x / cellW)));
-        const myRow = Math.max(0, Math.min(GRID_SIZE-1, Math.floor(this.y / cellH)));
+        const myCol = Math.max(0, Math.min(distMap.length - 1, Math.floor(this.x / cellW)));
+        const myRow = Math.max(0, Math.min(distMap.length - 1, Math.floor(this.y / cellH)));
 
         const onWhite = lightGrid[myCol] && lightGrid[myCol][myRow] === "WHITE";
 
-        const searchRadius = 4; // fix 67: search radius changed from 2 to 4
+        // 1. FLOW FIELD STEERING
+        // We look for the neighboring WHITE cell with the lowest distance score
+        let bestDist = distMap[myCol] && distMap[myCol][myRow] !== undefined ? distMap[myCol][myRow] : Infinity;
+        let targetX = 0; let targetY = 0;
+        let foundPath = false;
+
+        const searchRadius = 2; 
         const startX = Math.max(0, myCol - searchRadius);
-        const endX = Math.min(GRID_SIZE-1, myCol + searchRadius);
+        const endX = Math.min(distMap.length - 1, myCol + searchRadius);
         const startY = Math.max(0, myRow - searchRadius);
-        const endY = Math.min(GRID_SIZE-1, myRow + searchRadius);
+        const endY = Math.min(distMap.length - 1, myRow + searchRadius);
 
         for (let x = startX; x <= endX; x++) {
             for (let y = startY; y <= endY; y++) {
@@ -63,25 +69,39 @@ export class Particle {
 
                 const dx = cellCenterX - this.x;
                 const dy = cellCenterY - this.y;
-                const dist = Math.hypot(dx, dy);
+                const distToCell = Math.hypot(dx, dy);
 
-                if (dist > 0) {
-                    if (cellColor === "WHITE") {
-                        const weight = 1 / dist;
-                        steerX += (dx / dist) * weight;
-                        steerY += (dy / dist) * weight;
-                        whiteCount++;
-                    } else if (cellColor === "RED") {
-                        const weight = 1 / dist;
-                        // fix 6767: change from 3.5 -> 5.5 -> Stronger Fire Avoidance (Better Crowd Behaviour)
-                        steerX -= (dx / dist) * weight * 5.5; 
-                        steerY -= (dy / dist) * weight * 5.5;
+                if (distToCell > 0) {
+                    if (cellColor === "RED") {
+                        const weight = 1 / distToCell;
+                        steerX -= (dx / distToCell) * weight * 3.5; 
+                        steerY -= (dy / distToCell) * weight * 3.5;
                         redCount++;
+                    } else if (cellColor === "WHITE") {
+                        // THE FIX: Is this cell further "downhill" toward the exit?
+                        if (distMap[x][y] < bestDist) {
+                            bestDist = distMap[x][y];
+                            targetX = cellCenterX;
+                            targetY = cellCenterY;
+                            foundPath = true;
+                        }
                     }
                 }
             }
         }
 
+        // Apply strong steering down the correct path
+        if (foundPath) {
+            const dx = targetX - this.x;
+            const dy = targetY - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0) {
+                steerX += (dx / dist) * 1.5; 
+                steerY += (dy / dist) * 1.5;
+            }
+        }
+
+        // 2. THE COMPASS (Fallback)
         let compassX = 0; let compassY = 0;
         if (exits.length > 0) {
             let closest = exits[0];
@@ -101,10 +121,12 @@ export class Particle {
             }
         }
 
-        if (whiteCount > 0 || redCount > 0) {
-            steerX += compassX * this.compassPower;
-            steerY += compassY * this.compassPower;
+        if (foundPath || redCount > 0) {
+            // Compass is heavily nerfed (0.10) so they trust the Flow Field to route around obstacles
+            steerX += compassX * 0.10;
+            steerY += compassY * 0.10;
 
+            // Brownian noise to prevent perfectly straight lines and simulate panic
             steerX += (Math.random() - 0.5) * 0.8;
             steerY += (Math.random() - 0.5) * 0.8;
 
@@ -122,7 +144,7 @@ export class Particle {
                 }
                 this.applyForce(steerX, steerY);
             }
-            this.color = redCount > whiteCount ? '#ff8800' : '#ffffff';
+            this.color = redCount > 0 ? '#ff8800' : '#ffffff';
         } else {
             this.applyForce((Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05);
             this.color = this.baseColor;

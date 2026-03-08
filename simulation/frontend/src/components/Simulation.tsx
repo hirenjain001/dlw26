@@ -92,6 +92,50 @@ export const Simulation: React.FC = () => {
             const cellW = canvas.width / GRID_SIZE;
             const cellH = canvas.height / GRID_SIZE;
 
+            // --- NEW: THE FLOW FIELD (BFS PATH MAP) ---
+            const distMap = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(Infinity));
+            const queue: {x: number, y: number, d: number}[] = [];
+
+            // 1. Find the start of the path (WHITE cells touching the green exit)
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (lg[x][y] === "WHITE") {
+                        const px = x * cellW + cellW / 2;
+                        const py = y * cellH + cellH / 2;
+                        let touchesExit = false;
+                        
+                        exits.forEach(e => {
+                            if (px >= e.x - cellW && px <= e.x + e.w + cellW &&
+                                py >= e.y - cellH && py <= e.y + e.h + cellH) {
+                                touchesExit = true;
+                            }
+                        });
+
+                        if (touchesExit) {
+                            distMap[x][y] = 0;
+                            queue.push({x, y, d: 0});
+                        }
+                    }
+                }
+            }
+
+            // 2. Map the distance uphill along the rest of the WHITE corridor
+            const bfsDirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+            let head = 0;
+            while (head < queue.length) {
+                const {x, y, d} = queue[head++];
+                for (const [dx, dy] of bfsDirs) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                        if (lg[nx][ny] === "WHITE" && distMap[nx][ny] > d + 1) {
+                            distMap[nx][ny] = d + 1;
+                            queue.push({x: nx, y: ny, d: d + 1});
+                        }
+                    }
+                }
+            }
+            // ------------------------------------------
+
             for (let x = 0; x < GRID_SIZE; x++) {
                 for (let y = 0; y < GRID_SIZE; y++) {
                     const c = lg[x][y];
@@ -111,97 +155,6 @@ export const Simulation: React.FC = () => {
                     }
 
                     ctx.fillRect(px, py, cellW, cellH);
-                    
-                    // added function 1 *** -> Direction Arrows on AI Guidance Lights
-                    if (c === "WHITE" && exits.length > 0) {
-                        const centerX = px + cellW / 2;
-                        const centerY = py + cellH / 2;
-
-                        // Find nearest exit to this tile
-                        let nearestExit = exits[0];
-                        let nearestExitDist = Infinity;
-
-                        exits.forEach(exit => {
-                            const ex = exit.x + exit.w / 2;
-                            const ey = exit.y + exit.h / 2;
-                            const d = Math.hypot(ex - centerX, ey - centerY);
-                            if (d < nearestExitDist) {
-                                nearestExitDist = d;
-                                nearestExit = exit;
-                            }
-                        });
-
-                        const exitX = nearestExit.x + nearestExit.w / 2;
-                        const exitY = nearestExit.y + nearestExit.h / 2;
-
-                        // Search all 8 neighbours for the best next WHITE tile
-                        const dirs = [
-                            [1, 0], [-1, 0], [0, 1], [0, -1],
-                            [1, 1], [1, -1], [-1, 1], [-1, -1]
-                        ];
-
-                        let bestDirX = 0;
-                        let bestDirY = 0;
-                        let bestScore = Infinity;
-
-                        for (const [dx, dy] of dirs) {
-                            const nx = x + dx;
-                            const ny = y + dy;
-
-                            if (nx < 0 || nx > GRID_SIZE-1 || ny < 0 || ny > GRID_SIZE-1) continue;
-                            if (lg[nx][ny] !== "WHITE") continue;
-
-                            const neighbourCenterX = nx * cellW + cellW / 2;
-                            const neighbourCenterY = ny * cellH + cellH / 2;
-
-                            // Score = how close this neighbouring WHITE tile is to the exit
-                            const score = Math.hypot(exitX - neighbourCenterX, exitY - neighbourCenterY);
-
-                            if (score < bestScore) {
-                                bestScore = score;
-                                bestDirX = dx;
-                                bestDirY = dy;
-                            }
-                        }
-
-                        // Only draw arrow if we found a valid neighbouring WHITE tile
-                        if (bestDirX !== 0 || bestDirY !== 0) {
-                            const mag = Math.hypot(bestDirX, bestDirY);
-                            const dirX = bestDirX / mag;
-                            const dirY = bestDirY / mag;
-
-                            const arrowLength = cellW * 0.35;
-                            const endX = centerX + dirX * arrowLength;
-                            const endY = centerY + dirY * arrowLength;
-
-                            ctx.strokeStyle = "rgba(255,255,255,0.9)";
-                            ctx.fillStyle = "rgba(255,255,255,0.9)";
-                            ctx.lineWidth = 2;
-
-                            // Arrow shaft
-                            ctx.beginPath();
-                            ctx.moveTo(centerX, centerY);
-                            ctx.lineTo(endX, endY);
-                            ctx.stroke();
-
-                            // Arrow head
-                            const headSize = 6;
-                            const angle = Math.atan2(dirY, dirX);
-
-                            ctx.beginPath();
-                            ctx.moveTo(endX, endY);
-                            ctx.lineTo(
-                                endX - headSize * Math.cos(angle - Math.PI / 6),
-                                endY - headSize * Math.sin(angle - Math.PI / 6)
-                            );
-                            ctx.lineTo(
-                                endX - headSize * Math.cos(angle + Math.PI / 6),
-                                endY - headSize * Math.sin(angle + Math.PI / 6)
-                            );
-                            ctx.closePath();
-                            ctx.fill();
-                        }
-                    }
 
                     ctx.shadowBlur = 0;
                 }
@@ -241,7 +194,7 @@ export const Simulation: React.FC = () => {
 
             // Execute Physics Loop
             swarmRef.current.forEach(particle => {
-                particle.applyLightGrid(lg, cellW, cellH, exits);
+                particle.applyLightGrid(lg, distMap, cellW, cellH, exits);
                 particle.resolveWalls(walls);          
                 particle.separate(swarmRef.current);   
                 particle.checkEscaped(exits);
