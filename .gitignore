@@ -62,6 +62,7 @@ Thumbs.db
 *.swp
 *.tmp
 *.bak
+tb_logs
 
 # =========================
 # Front-end
